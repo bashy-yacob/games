@@ -992,257 +992,359 @@
   const ALL_GAMES = [gameCandles, gameTable, gameClean, gameChallah, gameCook, gameShop, gameClothes, gameHotplate, gameFlowers, gameBooks];
 
   /* ============================================================
-     Hub — בית עם חדרים ודמות שמסתובבת (הכל מצויר על הקנבס)
-       · תנועה בחיצים/WASD (רציף) או הקשה על הרצפה/תחנה
-       · ניווט בין חדרים דרך פתחי דלת (חיפוש מסלול BFS)
-       · התקרבות לתחנה + Enter/הקשה פותחים את המיני-משחק
+     Hub — בית מצויר במבט מהצד: חדרים גדולים, דמות שמהלכת, ומשימות בתוך החדר
+       · תנועה בחיצים ←→ / A-D (רציף) או הקשה על הרצפה / התחנה
+       · מעבר בין חדרים דרך דלת בקצה (הליכה לקצה או הקשה על הדלת)
+       · הקרבה לתחנה + Enter/הקשה מפעילים את המשימה — והרהיט משתנה למצב "מוכן"
      ============================================================ */
   const heldKeys = {};                          // מקשים מוחזקים לתנועה רציפה
-  const CELL = 16;                              // גודל תא לחיפוש מסלול
 
   const Hub = {
-    t: 0, built: false, hintT: 7, stuckT: 0,
-    OX: 16, OY: 42, OW: 448, OH: 552, WT: 9,
-    walls: [], rooms: [], stations: [], player: null,
-    path: null, targetStation: null, nearStation: null,
+    t: 0, built: false, hintT: 7,
+    FLOORY: 400, baseY: 474,                     // גובה הרצפה + קו הרגליים של הדמות
+    rooms: [], idx: 1, player: null,
+    targetX: null, targetStation: null, nearStation: null, trans: 0,
 
     build() {
       const g = {}; ALL_GAMES.forEach(x => g[x.id] = x);
-      const right = this.OX + this.OW, bottom = this.OY + this.OH;
-      // חדרים (רצפה פנימית)
       this.rooms = [
-        { name: 'סלון', x: 25, y: 51, w: 206, h: 172, floor: '#6b4d33' },
-        { name: 'מטבח', x: 249, y: 51, w: 206, h: 172, floor: '#57584f' },
-        { name: 'חדר שינה', x: 25, y: 236, w: 206, h: 170, floor: '#54476b' },
-        { name: 'חדר שירות', x: 249, y: 236, w: 206, h: 170, floor: '#41565c' },
-        { name: 'חדר לימוד', x: 25, y: 419, w: 206, h: 164, floor: '#6b5a33' },
-        { name: 'כניסה', x: 249, y: 419, w: 206, h: 164, floor: '#5b4636' },
+        { id: 'kitchen', name: 'מטבח', stations: [
+          { id: 'challah', game: g.challah, x: 110, label: 'הכנת חלות' },
+          { id: 'cook', game: g.cook, x: 235, label: 'בישול חמין' },
+          { id: 'hotplate', game: g.hotplate, x: 340, label: 'הפעלת פלטה' },
+        ] },
+        { id: 'living', name: 'סלון ופינת אוכל', stations: [
+          { id: 'candles', game: g.candles, x: 165, label: 'הדלקת נרות' },
+          { id: 'table', game: g.table, x: 238, label: 'סידור השולחן' },
+          { id: 'flowers', game: g.flowers, x: 345, label: 'פרחים ויין' },
+          { id: 'books', game: g.books, x: 418, label: 'סידור ספרים' },
+        ] },
+        { id: 'bedroom', name: 'חדר שינה', stations: [
+          { id: 'clean', game: g.clean, x: 150, label: 'ניקיון' },
+          { id: 'clothes', game: g.clothes, x: 322, label: 'בגדי שבת' },
+        ] },
+        { id: 'entrance', name: 'כניסה', stations: [
+          { id: 'shop', game: g.shop, x: 235, label: 'קניות אחרונות' },
+        ] },
       ];
-      // קירות (מלבנים) עם פתחי דלת (רשימת פערים)
-      this.walls = [];
-      this.walls.push({ x: this.OX, y: this.OY, w: this.OW, h: this.WT });
-      this.walls.push({ x: this.OX, y: bottom - this.WT, w: this.OW, h: this.WT });
-      this.walls.push({ x: this.OX, y: this.OY, w: this.WT, h: this.OH });
-      this.walls.push({ x: right - this.WT, y: this.OY, w: this.WT, h: this.OH });
-      this.wallV(240, this.OY, bottom, [[120, 164], [300, 344], [480, 524]]);  // קיר אנכי מרכזי
-      this.wallH(227, this.OX, right, [[90, 134], [330, 374]]);                 // קיר אופקי עליון
-      this.wallH(410, this.OX, right, [[90, 134], [330, 374]]);                 // קיר אופקי תחתון
-      // תחנות (מיקום בתוך החדרים)
-      this.stations = [
-        { game: g.candles,  id: 'candles',  icon: '🕯️', label: 'הדלקת נרות', x: 100, y: 105 },
-        { game: g.table,    id: 'table',    icon: '🍽️', label: 'סידור השולחן', x: 155, y: 175 },
-        { game: g.challah,  id: 'challah',  icon: '🍞', label: 'הכנת חלות', x: 310, y: 110 },
-        { game: g.cook,     id: 'cook',     icon: '🍲', label: 'בישול', x: 405, y: 110 },
-        { game: g.clothes,  id: 'clothes',  icon: '👔', label: 'בגדי שבת', x: 135, y: 322 },
-        { game: g.hotplate, id: 'hotplate', icon: '🔌', label: 'הפעלת פלטה', x: 315, y: 322 },
-        { game: g.clean,    id: 'clean',    icon: '🧹', label: 'ניקיון', x: 410, y: 322 },
-        { game: g.books,    id: 'books',    icon: '📚', label: 'סידור ספרים', x: 130, y: 500 },
-        { game: g.shop,     id: 'shop',     icon: '🛒', label: 'קניות', x: 320, y: 505 },
-        { game: g.flowers,  id: 'flowers',  icon: '💐', label: 'פרחים ויין', x: 412, y: 505 },
-      ];
-      this.player = { x: 345, y: 520, hw: 11, hh: 13, vx: 0, vy: 0, face: 1, phase: 0, moving: false };
-      this.path = null; this.targetStation = null; this.nearStation = null;
-      this.hintT = 7; this.built = true;
+      this.idx = 1;
+      this.player = { x: DW / 2, vx: 0, face: 1, phase: 0, moving: false };
+      this.targetX = null; this.targetStation = null; this.nearStation = null;
+      this.trans = 0; this.hintT = 7; this.built = true;
     },
 
-    // עוזרי קירות: קטע קו פחות הפתחים
-    subtract(a, b, gaps) {
-      const pts = [a]; gaps.forEach(g => pts.push(g[0], g[1])); pts.push(b);
-      const segs = []; for (let i = 0; i < pts.length; i += 2) if (pts[i + 1] > pts[i]) segs.push([pts[i], pts[i + 1]]);
-      return segs;
-    },
-    wallV(x, y1, y2, gaps) { this.subtract(y1, y2, gaps).forEach(s => this.walls.push({ x: x - this.WT / 2, y: s[0], w: this.WT, h: s[1] - s[0] })); },
-    wallH(y, x1, x2, gaps) { this.subtract(x1, x2, gaps).forEach(s => this.walls.push({ x: s[0], y: y - this.WT / 2, w: s[1] - s[0], h: this.WT })); },
-
-    clearTarget() { this.path = null; this.targetStation = null; this.stuckT = 0; },
-
-    // ----- חיפוש מסלול על רשת גסה (BFS) לניווט בין חדרים -----
-    cellWalkable(cx, cy) {
-      const px = this.OX + cx * CELL + CELL / 2, py = this.OY + cy * CELL + CELL / 2;
-      const m = 12;
-      if (px < this.OX + m || px > this.OX + this.OW - m || py < this.OY + m || py > this.OY + this.OH - m) return false;
-      for (const w of this.walls) if (px > w.x - m && px < w.x + w.w + m && py > w.y - m && py < w.y + w.h + m) return false;
-      return true;
-    },
-    findPath(tx, ty) {
-      const cols = Math.ceil(this.OW / CELL), rows = Math.ceil(this.OH / CELL);
-      const toCell = (x, y) => ({ cx: clamp(Math.floor((x - this.OX) / CELL), 0, cols - 1), cy: clamp(Math.floor((y - this.OY) / CELL), 0, rows - 1) });
-      const start = toCell(this.player.x, this.player.y);
-      let goal = toCell(tx, ty);
-      if (!this.cellWalkable(goal.cx, goal.cy)) {              // יעד חסום → תא הליך קרוב
-        let best = null, bd = 1e9;
-        for (let cy = 0; cy < rows; cy++) for (let cx = 0; cx < cols; cx++)
-          if (this.cellWalkable(cx, cy)) { const d = (cx - goal.cx) ** 2 + (cy - goal.cy) ** 2; if (d < bd) { bd = d; best = { cx, cy }; } }
-        if (!best) return null; goal = best;
-      }
-      const key = c => c.cx + ',' + c.cy, came = {}, q = [start];
-      came[key(start)] = null; let found = false;
-      while (q.length) {
-        const c = q.shift();
-        if (c.cx === goal.cx && c.cy === goal.cy) { found = true; break; }
-        const nb = [{ cx: c.cx + 1, cy: c.cy }, { cx: c.cx - 1, cy: c.cy }, { cx: c.cx, cy: c.cy + 1 }, { cx: c.cx, cy: c.cy - 1 }];
-        for (const n of nb) if (n.cx >= 0 && n.cy >= 0 && n.cx < cols && n.cy < rows && !(key(n) in came) && this.cellWalkable(n.cx, n.cy)) { came[key(n)] = c; q.push(n); }
-      }
-      if (!found) return null;
-      const path = []; let cur = goal;
-      while (cur) { path.push({ x: this.OX + cur.cx * CELL + CELL / 2, y: this.OY + cur.cy * CELL + CELL / 2 }); cur = came[key(cur)]; }
-      path.reverse(); path.push({ x: tx, y: ty });            // צעד אחרון אל היעד המדויק
-      return path;
+    room() { return this.rooms[this.idx]; },
+    clearTarget() { this.targetX = null; this.targetStation = null; },
+    changeRoom(dir) {
+      const ni = this.idx + dir;
+      if (ni < 0 || ni >= this.rooms.length) return;
+      this.idx = ni; this.clearTarget();
+      this.player.x = dir > 0 ? 62 : DW - 62;
+      this.trans = 1; AudioManager.sfx('place');
     },
 
     update(dt) {
       this.t += dt; if (this.hintT > 0) this.hintT -= dt;
-      const p = this.player; if (!p) return;
-      let ax = 0, ay = 0;
+      if (this.trans > 0) { this.trans = Math.max(0, this.trans - dt * 2.6); return; }
+      const p = this.player;
+      let ax = 0;
       if (heldKeys['ArrowLeft'] || heldKeys['a'] || heldKeys['A']) ax -= 1;
       if (heldKeys['ArrowRight'] || heldKeys['d'] || heldKeys['D']) ax += 1;
-      if (heldKeys['ArrowUp'] || heldKeys['w'] || heldKeys['W']) ay -= 1;
-      if (heldKeys['ArrowDown'] || heldKeys['s'] || heldKeys['S']) ay += 1;
-      const usingKeys = ax !== 0 || ay !== 0;
-      if (usingKeys) { this.path = null; this.targetStation = null; }
-      else if (this.path && this.path.length) {
-        const wp = this.path[0], dx = wp.x - p.x, dy = wp.y - p.y, d = Math.hypot(dx, dy);
-        if (d < 7) { this.path.shift(); if (!this.path.length) this.path = null; }
-        else { ax = dx / d; ay = dy / d; }
-      }
-      const len = Math.hypot(ax, ay) || 1, spd = 150;
-      p.vx = ax / len * spd; p.vy = ay / len * spd;
-      const bx = p.x, by = p.y;
-      if (ax || ay) { this.moveAxis('x', p.vx * dt); this.moveAxis('y', p.vy * dt); }
-      p.moving = (ax || ay) !== 0;
-      if (p.vx > 1) p.face = 1; else if (p.vx < -1) p.face = -1;
+      const usingKeys = ax !== 0;
+      if (usingKeys) { this.targetX = null; this.targetStation = null; }
+      else if (this.targetX != null) { const dx = this.targetX - p.x; if (Math.abs(dx) > 4) ax = Math.sign(dx); else this.targetX = null; }
+      p.vx = ax * 155;
+      p.x = clamp(p.x + p.vx * dt, 44, DW - 44);
+      p.moving = ax !== 0;
+      if (ax > 0) p.face = 1; else if (ax < 0) p.face = -1;
       if (p.moving) p.phase += dt * 11;
-      // שוחרר מתקיעה
-      if ((this.path || this.targetStation) && Math.hypot(p.x - bx, p.y - by) < 0.3) {
-        this.stuckT += dt; if (this.stuckT > 0.5) this.clearTarget();
-      } else this.stuckT = 0;
-      // התחנה הקרובה (להדגשה ולפתיחה ב-Enter)
-      this.nearStation = null; let bestD = 46 * 46;
-      this.stations.forEach(s => { if (GameState.completed.has(s.id)) return; const d = dist2(p.x, p.y, s.x, s.y); if (d < bestD) { bestD = d; this.nearStation = s; } });
+      // דלתות בקצה
+      if (p.x <= 46 && this.idx > 0) { this.changeRoom(-1); return; }
+      if (p.x >= DW - 46 && this.idx < this.rooms.length - 1) { this.changeRoom(1); return; }
+      // תחנה קרובה
+      this.nearStation = null; let bd = 46;
+      this.room().stations.forEach(s => { if (GameState.completed.has(s.id)) return; const d = Math.abs(p.x - s.x); if (d < bd) { bd = d; this.nearStation = s; } });
       // פתיחה אוטומטית כשמגיעים לתחנה שנבחרה בהקשה
-      if (this.targetStation && !GameState.completed.has(this.targetStation.id) &&
-        dist2(p.x, p.y, this.targetStation.x, this.targetStation.y) < 44 * 44) {
+      if (this.targetStation && !GameState.completed.has(this.targetStation.id) && Math.abs(p.x - this.targetStation.x) < 38) {
         const gm = this.targetStation.game; this.clearTarget(); SceneManager.openGame(gm);
-      }
-    },
-    moveAxis(axis, delta) {
-      const p = this.player;
-      if (axis === 'x') p.x += delta; else p.y += delta;
-      const box = { x: p.x - p.hw, y: p.y - p.hh, w: p.hw * 2, h: p.hh * 2 };
-      for (const w of this.walls) {
-        if (box.x < w.x + w.w && box.x + box.w > w.x && box.y < w.y + w.h && box.y + box.h > w.y) {
-          if (axis === 'x') { if (delta > 0) p.x = w.x - p.hw; else if (delta < 0) p.x = w.x + w.w + p.hw; box.x = p.x - p.hw; }
-          else { if (delta > 0) p.y = w.y - p.hh; else if (delta < 0) p.y = w.y + w.h + p.hh; box.y = p.y - p.hh; }
-        }
       }
     },
 
     // ----------------- ציור -----------------
+    frac() { return GameState.difficulty === 'practice' ? 0.6 : clamp(GameState.mainTimer / GameState.mainTimerMax, 0, 1); },
     render() {
-      const p = this.player;
-      const frac = GameState.difficulty === 'practice' ? 0.6 : clamp(GameState.mainTimer / GameState.mainTimerMax, 0, 1);
-      // חוץ — שמי ערב שבת שמחשיכים
-      const sky = ctx.createLinearGradient(0, 0, 0, DH);
-      sky.addColorStop(0, mixSky(frac)); sky.addColorStop(1, '#0e1636');
-      ctx.fillStyle = sky; ctx.fillRect(0, 0, DW, DH);
-      if (frac < 0.65) { ctx.fillStyle = 'rgba(255,255,255,' + (0.5 * (1 - frac)).toFixed(2) + ')'; for (let i = 0; i < 20; i++) ctx.fillRect((i * 97) % DW, (i * 53) % 34 + 6, 2, 2); }
-      // בסיס הבית (קיר/מסגרת)
-      fillRoundRect(this.OX - 4, this.OY - 4, this.OW + 8, this.OH + 8, 14, '#3b2b1e');
-      // רצפות חדרים + פסי פרקט
-      this.rooms.forEach(r => {
-        fillRoundRect(r.x, r.y, r.w, r.h, 4, r.floor);
-        ctx.save(); ctx.globalAlpha = 0.08; ctx.strokeStyle = '#000'; ctx.lineWidth = 1;
-        for (let fy = r.y + 15; fy < r.y + r.h; fy += 18) { ctx.beginPath(); ctx.moveTo(r.x, fy); ctx.lineTo(r.x + r.w, fy); ctx.stroke(); }
-        ctx.restore();
-      });
-      this.drawFurniture(frac);
-      // קירות
-      this.walls.forEach(w => { fillRoundRect(w.x, w.y, w.w, w.h, 3, '#caa06a'); ctx.fillStyle = 'rgba(0,0,0,0.12)'; ctx.fillRect(w.x, w.y, w.w, Math.min(3, w.h)); });
-      // תוויות חדרים
-      this.rooms.forEach(r => txt(r.name, r.x + r.w - 7, r.y + 13, { size: 11, color: 'rgba(255,248,231,0.5)', align: 'right' }));
-      // תחנות + דמות
-      this.stations.forEach(s => this.drawStation(s));
+      const frac = this.frac();
+      this.drawRoomScene(frac);
+      this.drawDoors();
       this.drawPlayer();
-      // רמז פתיחה מתפוגג
+      // הדגשת התחנה הקרובה + רמז
+      const s = this.nearStation;
+      if (s) {
+        ctx.save(); ctx.strokeStyle = 'rgba(244,197,66,0.9)'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.ellipse(s.x, this.FLOORY + 2, 34, 10, 0, 0, 7); ctx.stroke(); ctx.restore();
+        const by = 150 + Math.sin(this.t * 5) * 3;
+        fillRoundRect(s.x - 44, by, 88, 22, 11, 'rgba(244,197,66,0.96)');
+        txt('▶ ' + s.label, s.x, by + 11, { size: 12, color: '#3a2a05', weight: '800' });
+      }
+      // שם החדר + מד חדר
+      const total = this.room().stations.length;
+      const done = this.room().stations.filter(x => GameState.completed.has(x.id)).length;
+      fillRoundRect(DW / 2 - 96, 8, 192, 26, 13, 'rgba(10,14,30,0.6)');
+      txt(this.room().name + '  ·  ' + done + '/' + total, DW / 2, 21, { size: 14, color: '#ffe9b0', weight: '800' });
+      // רמז מתפוגג
       if (this.hintT > 0) {
         ctx.globalAlpha = clamp(this.hintT / 2, 0, 1);
-        fillRoundRect(DW / 2 - 158, DH - 30, 316, 22, 11, 'rgba(0,0,0,0.6)');
-        txt('הסתובבו בבית (חיצים / הקשה) והכינו הכל לשבת 🕯️', DW / 2, DH - 19, { size: 12, color: '#ffe9b0' });
+        fillRoundRect(DW / 2 - 150, DH - 26, 300, 20, 10, 'rgba(0,0,0,0.6)');
+        txt('הליכה: חיצים ←→ או הקשה · דלתות בצדדים · Enter מתחיל משימה', DW / 2, DH - 16, { size: 11, color: '#ffe9b0' });
         ctx.globalAlpha = 1;
       }
+      if (this.trans > 0) { ctx.fillStyle = 'rgba(10,14,30,' + this.trans.toFixed(2) + ')'; ctx.fillRect(0, 0, DW, DH); }
     },
-    drawFurniture(frac) {
-      // ----- סלון: ספה, חלון עם שקיעה -----
-      fillRoundRect(30, 118, 40, 84, 8, '#3f6ea3');
-      fillRoundRect(34, 126, 30, 32, 6, '#5c8ec8'); fillRoundRect(34, 162, 30, 32, 6, '#5c8ec8');
-      fillRoundRect(150, 50, 66, 10, 2, '#26365f');           // מסגרת חלון בקיר
-      fillRoundRect(154, 56, 58, 30, 4, mixSky(frac));
-      ctx.save(); ctx.shadowColor = '#ffcf6a'; ctx.shadowBlur = 12; ctx.fillStyle = frac > 0.4 ? '#ffcf6a' : '#ffe9c0';
-      ctx.beginPath(); ctx.arc(183, lerp(62, 82, 1 - frac), 7, 0, 7); ctx.fill(); ctx.restore();
-      ctx.strokeStyle = '#caa06a'; ctx.lineWidth = 1.5; ctx.strokeRect(154, 56, 58, 30);
-      ctx.beginPath(); ctx.moveTo(183, 56); ctx.lineTo(183, 86); ctx.stroke();
-      // ----- מטבח: משטח עבודה, מקרר, כיריים -----
-      fillRoundRect(252, 58, 200, 18, 4, '#8a8f96'); fillRoundRect(252, 58, 200, 5, 3, '#aab0b6');
-      fillRoundRect(430, 84, 22, 52, 5, '#dfe3e8'); ctx.strokeStyle = '#b7bcc2'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(430, 104); ctx.lineTo(452, 104); ctx.stroke();
-      fillRoundRect(388, 122, 44, 24, 5, '#2f2f36');
-      // ----- חדר שינה: מיטה -----
-      fillRoundRect(30, 300, 62, 88, 8, '#6d5a86'); fillRoundRect(30, 300, 62, 26, 8, '#efe9f2');
-      // ----- חדר שירות: מכונת כביסה, מדף -----
-      fillRoundRect(252, 348, 40, 46, 6, '#cfd6da'); ctx.strokeStyle = '#8f979c'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(272, 371, 12, 0, 7); ctx.stroke();
-      fillRoundRect(360, 250, 90, 7, 2, '#7a5a33');
-      // ----- חדר לימוד: כוננית ספרים, שולחן -----
-      fillRoundRect(30, 548, 190, 26, 4, '#5a3f22');
-      const cols = ['#c85a54', '#4a7ec8', '#5aa86a', '#d9a53a'];
-      for (let i = 0, bx = 36; bx < 214; bx += 13, i++) fillRoundRect(bx, 552, 10, 20, 2, cols[i % 4]);
-      fillRoundRect(150, 468, 62, 9, 3, '#6b4a2a');
-      // ----- כניסה: דלת ושטיח -----
-      fillRoundRect(300, 574, 62, 9, 3, '#7a4a26'); txt('🚪', 331, 566, { size: 18 });
-      fillRoundRect(300, 542, 72, 24, 6, '#4a5f4a');
+    renderBackdrop() {
+      this.drawRoomScene(this.frac());
+      this.drawPlayer();
+      ctx.fillStyle = 'rgba(10,14,30,0.55)'; ctx.fillRect(0, 0, DW, DH);
     },
-    drawStation(s) {
-      const done = GameState.completed.has(s.id), near = this.nearStation === s;
-      ctx.save(); if (near) { ctx.shadowColor = '#f4c542'; ctx.shadowBlur = 20; }
-      fillRoundRect(s.x - 23, s.y - 4, 46, 18, 8, done ? 'rgba(120,200,120,0.4)' : 'rgba(16,22,46,0.5)');
+    drawRoomScene(frac) {
+      const r = this.room();
+      if (r.id === 'kitchen') this.drawKitchen(frac);
+      else if (r.id === 'living') this.drawLiving(frac);
+      else if (r.id === 'bedroom') this.drawBedroom(frac);
+      else this.drawEntrance(frac);
+    },
+
+    // עוזרי ציור משותפים
+    shell(topC, botC, floorC, floorC2) {
+      const g = ctx.createLinearGradient(0, 0, 0, this.FLOORY);
+      g.addColorStop(0, topC); g.addColorStop(1, botC);
+      ctx.fillStyle = g; ctx.fillRect(0, 0, DW, this.FLOORY);
+      const fg = ctx.createLinearGradient(0, this.FLOORY, 0, DH);
+      fg.addColorStop(0, floorC); fg.addColorStop(1, floorC2);
+      ctx.fillStyle = fg; ctx.fillRect(0, this.FLOORY, DW, DH - this.FLOORY);
+      ctx.fillStyle = 'rgba(0,0,0,0.2)'; ctx.fillRect(0, this.FLOORY - 5, DW, 5);
+      ctx.strokeStyle = 'rgba(0,0,0,0.07)'; ctx.lineWidth = 1;
+      for (let i = 1; i < 6; i++) { const y = this.FLOORY + (DH - this.FLOORY) * (i / 6); ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(DW, y); ctx.stroke(); }
+    },
+    window(x, y, w, h, frac) {
+      fillRoundRect(x - 5, y - 5, w + 10, h + 10, 7, '#5a4632');
+      ctx.save(); roundRect(x, y, w, h, 3); ctx.clip();
+      ctx.fillStyle = mixSky(frac); ctx.fillRect(x, y, w, h);
+      const sunY = y + lerp(h * 0.18, h * 0.82, 1 - frac);
+      ctx.shadowColor = '#ffcf6a'; ctx.shadowBlur = 16; ctx.fillStyle = frac > 0.4 ? '#ffd66a' : '#ffe9c8';
+      ctx.beginPath(); ctx.arc(x + w * 0.5, sunY, 12, 0, 7); ctx.fill();
       ctx.restore();
-      if (near) { ctx.strokeStyle = '#f4c542'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(s.x, s.y - 1, 25, 0, 7); ctx.stroke(); }
-      const bob = near ? Math.sin(this.t * 6) * 2 : (done ? 0 : Math.sin(this.t * 2 + s.x) * 1);
-      txt(s.icon, s.x, s.y - 8 + bob, { size: 29 });
-      txt(s.label, s.x, s.y + 21, { size: 10, color: done ? '#a8e0a8' : '#f4e6c0', weight: '700' });
-      if (done) txt('✔', s.x + 18, s.y - 17, { size: 16, color: '#7ed67e', weight: '900' });
-      if (near && !done) {
-        fillRoundRect(s.x - 42, s.y - 48, 84, 20, 10, 'rgba(244,197,66,0.96)');
-        txt('▶ התחל', s.x, s.y - 38, { size: 12, color: '#3a2a05', weight: '800' });
+      ctx.strokeStyle = '#5a4632'; ctx.lineWidth = 3; ctx.strokeRect(x, y, w, h);
+      ctx.beginPath(); ctx.moveTo(x + w / 2, y); ctx.lineTo(x + w / 2, y + h); ctx.moveTo(x, y + h / 2); ctx.lineTo(x + w, y + h / 2); ctx.stroke();
+    },
+    drawDoors() {
+      const dy = this.FLOORY - 118;
+      if (this.idx > 0) {
+        fillRoundRect(4, dy, 32, 118, 5, '#4a3320'); fillRoundRect(8, dy + 4, 24, 110, 4, '#5e4126');
+        ctx.fillStyle = '#f4c542'; ctx.beginPath(); ctx.arc(12, dy + 60, 2.5, 0, 7); ctx.fill();
+        txt('‹', 20, dy + 46, { size: 26, color: '#ffe9b0', weight: '900' });
+        txt(this.rooms[this.idx - 1].name, 20, dy + 104, { size: 8, color: '#f4e6c0' });
+      }
+      if (this.idx < this.rooms.length - 1) {
+        fillRoundRect(DW - 36, dy, 32, 118, 5, '#4a3320'); fillRoundRect(DW - 32, dy + 4, 24, 110, 4, '#5e4126');
+        ctx.fillStyle = '#f4c542'; ctx.beginPath(); ctx.arc(DW - 12, dy + 60, 2.5, 0, 7); ctx.fill();
+        txt('›', DW - 20, dy + 46, { size: 26, color: '#ffe9b0', weight: '900' });
+        txt(this.rooms[this.idx + 1].name, DW - 20, dy + 104, { size: 8, color: '#f4e6c0' });
       }
     },
     drawPlayer() {
-      const p = this.player, step = p.moving ? Math.sin(p.phase) * 3 : 0;
-      ctx.save(); ctx.translate(p.x, p.y);
-      ctx.fillStyle = 'rgba(0,0,0,0.28)'; ctx.beginPath(); ctx.ellipse(0, 15, 12, 5, 0, 0, 7); ctx.fill();
-      ctx.fillStyle = '#3a4a7a';                          // רגליים
-      ctx.beginPath(); ctx.ellipse(-4, 12 + step, 3.2, 5, 0, 0, 7); ctx.fill();
-      ctx.beginPath(); ctx.ellipse(4, 12 - step, 3.2, 5, 0, 0, 7); ctx.fill();
-      ctx.fillStyle = '#f4f0e6'; roundRect(-9, -4, 18, 18, 6); ctx.fill();   // חולצת שבת
-      ctx.beginPath(); ctx.ellipse(-9 * p.face, 5, 3, 4, 0, 0, 7); ctx.fill(); // יד
-      ctx.fillStyle = '#f0c9a0'; ctx.beginPath(); ctx.arc(0, -12, 8, 0, 7); ctx.fill(); // ראש (סכמטי, בלי פרצוף)
-      ctx.fillStyle = '#5a6ad0'; ctx.beginPath(); ctx.arc(0, -15, 7, Math.PI, 0); ctx.fill(); // כיפה
+      const p = this.player, sw = p.moving ? Math.sin(p.phase) : 0, s = 1.5;
+      ctx.save(); ctx.translate(p.x, this.baseY);
+      ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.beginPath(); ctx.ellipse(0, 6, 15, 5, 0, 0, 7); ctx.fill();
+      ctx.scale(p.face * s, s);
+      // רגליים
+      ctx.save(); ctx.translate(-3, -2); ctx.rotate(sw * 0.35); fillRoundRect(-2.2, 0, 4.4, 11, 2, '#2f3d63'); ctx.restore();
+      ctx.save(); ctx.translate(3, -2); ctx.rotate(-sw * 0.35); fillRoundRect(-2.2, 0, 4.4, 11, 2, '#2f3d63'); ctx.restore();
+      // גוף (חולצת שבת בהירה)
+      fillRoundRect(-7, -17, 14, 17, 5, '#f6f2e8');
+      fillRoundRect(-7, -6, 14, 6, 3, '#33406b');            // חגורה/מכנס עליון
+      // יד קדמית מתנדנדת
+      ctx.save(); ctx.translate(4.5, -15); ctx.rotate(-sw * 0.5); fillRoundRect(-2.3, 0, 4.6, 12, 2.3, '#f6f2e8'); ctx.restore();
+      // ראש (סכמטי, בלי פרצוף)
+      ctx.fillStyle = '#f0c9a0'; ctx.beginPath(); ctx.arc(0, -23, 7, 0, 7); ctx.fill();
+      ctx.fillStyle = '#4a5ec8'; ctx.beginPath(); ctx.arc(0, -26, 6.6, Math.PI, 0); ctx.fill(); // כיפה
       ctx.restore();
     },
+
+    // ---------------- מטבח ----------------
+    drawKitchen(frac) {
+      this.shell('#d0a978', '#bd935a', '#9a7a52', '#7a5c3a');
+      this.window(48, 52, 86, 64, frac);
+      // ארונות עליונים
+      for (let x = 150; x < DW - 20; x += 74) { fillRoundRect(x, 24, 68, 46, 5, '#a9814f'); fillRoundRect(x + 4, 28, 60, 38, 3, '#b98d58'); ctx.fillStyle = '#6b4f2e'; ctx.fillRect(x + 30, 60, 8, 4); }
+      // משטח שיש + ארונות תחתונים
+      fillRoundRect(12, 356, 372, 14, 4, '#e7e2d6');
+      fillRoundRect(12, 370, 372, 30, 0, '#8a6a42');
+      ctx.strokeStyle = 'rgba(0,0,0,0.18)'; ctx.lineWidth = 1;
+      for (let x = 70; x < 384; x += 74) { ctx.beginPath(); ctx.moveTo(x, 372); ctx.lineTo(x, 400); ctx.stroke(); ctx.fillStyle = '#e7e2d6'; ctx.fillRect(x - 20, 384, 12, 3); }
+      // מקרר
+      fillRoundRect(384, 298, 52, 102, 7, '#e9ecef'); fillRoundRect(384, 346, 52, 3, 0, '#c3c8cd');
+      ctx.fillStyle = '#b7bcc2'; ctx.fillRect(427, 312, 4, 22); ctx.fillRect(427, 356, 4, 22);
+      // חלות (110)
+      if (GameState.completed.has('challah')) {
+        fillRoundRect(86, 344, 48, 12, 4, '#b98a4e');       // קרש
+        for (let i = 0; i < 2; i++) { const cx = 98 + i * 24; ctx.fillStyle = '#e0a94e'; ctx.beginPath(); ctx.ellipse(cx, 340, 12, 7, 0, 0, 7); ctx.fill(); ctx.strokeStyle = '#c4913c'; ctx.lineWidth = 1.5; for (let b = -2; b <= 2; b++) { ctx.beginPath(); ctx.moveTo(cx + b * 4, 334); ctx.lineTo(cx + b * 4 + 2, 346); ctx.stroke(); } }
+      } else {
+        ctx.fillStyle = '#ecd9b0'; ctx.beginPath(); ctx.ellipse(110, 346, 20, 10, 0, 0, 7); ctx.fill();
+        fillRoundRect(96, 350, 30, 5, 2, '#c9a15e');        // מערוך
+      }
+      // סיר בישול (235)
+      const cookDone = GameState.completed.has('cook');
+      fillRoundRect(210, 372, 50, 26, 3, '#3a3a42');        // כיריים
+      fillRoundRect(214, 338, 42, 22, 6, cookDone ? '#4a4a52' : '#55555f');
+      fillRoundRect(206, 334, 58, 7, 3, '#5a5a64');
+      if (cookDone) { ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 2; for (let i = 0; i < 3; i++) { const sx = 222 + i * 12; ctx.beginPath(); ctx.moveTo(sx, 330); ctx.quadraticCurveTo(sx + 5, 322, sx, 314); ctx.stroke(); } }
+      // פלטה (340)
+      const plDone = GameState.completed.has('hotplate');
+      ctx.save(); if (plDone) { ctx.shadowColor = '#ff7a3a'; ctx.shadowBlur = 20; }
+      fillRoundRect(314, 344, 54, 14, 4, plDone ? '#c95a2a' : '#5a5a60');
+      ctx.restore();
+      fillRoundRect(318, 340, 46, 6, 3, plDone ? '#e0863a' : '#6a6a72');
+      if (plDone) { fillRoundRect(322, 328, 16, 14, 3, '#8a8a92'); fillRoundRect(344, 330, 14, 12, 3, '#8a8a92'); }
+    },
+
+    // ---------------- סלון ופינת אוכל ----------------
+    drawLiving(frac) {
+      this.shell('#cdb089', '#b7986a', '#7c5638', '#5e3f28');
+      this.window(348, 48, 92, 72, frac);
+      // תמונת קיר / מזרח
+      fillRoundRect(44, 60, 76, 56, 5, '#6b4a2a'); fillRoundRect(50, 66, 64, 44, 3, '#3f6ea3');
+      txt('מזרח', 82, 88, { size: 15, color: '#ffe9b0', weight: '800' });
+      // כוננית ספרים (418)
+      fillRoundRect(392, 236, 60, 164, 5, '#5a3f22');
+      for (let sy = 262; sy < 396; sy += 44) { ctx.fillStyle = '#3e2a16'; ctx.fillRect(394, sy, 56, 4); }
+      const booksDone = GameState.completed.has('books');
+      const bc = ['#c85a54', '#4a7ec8', '#5aa86a', '#d9a53a', '#8a5ac8'];
+      for (let row = 0; row < 3; row++) {
+        for (let i = 0; i < 6; i++) {
+          const bx = 398 + i * 9, byy = 240 + row * 44;
+          ctx.save(); ctx.translate(bx, byy);
+          if (!booksDone && (i + row) % 3 === 0) ctx.rotate(0.18);
+          fillRoundRect(0, 0, 8, 20, 1, bc[(i + row) % 5]);
+          ctx.restore();
+        }
+      }
+      // מזנון + פרחים/יין (345)
+      fillRoundRect(310, 346, 82, 54, 5, '#6b4a2a'); fillRoundRect(310, 346, 82, 6, 3, '#7d5730');
+      const flDone = GameState.completed.has('flowers');
+      if (flDone) {
+        fillRoundRect(320, 330, 12, 18, 3, '#3f8f6a');       // אגרטל
+        ctx.fillStyle = '#e05a7a'; [[322, 322], [326, 316], [331, 322]].forEach(pt => { ctx.beginPath(); ctx.arc(pt[0], pt[1], 5, 0, 7); ctx.fill(); });
+        ctx.fillStyle = '#7a3b52'; fillRoundRect(346, 322, 10, 26, 2, '#7a2f46'); // בקבוק יין
+        ctx.fillStyle = '#f4c542'; ctx.beginPath(); ctx.moveTo(366, 348); ctx.lineTo(362, 336); ctx.lineTo(374, 336); ctx.closePath(); ctx.fill(); // גביע קידוש
+      } else { fillRoundRect(322, 334, 12, 14, 3, '#4a6a5a'); }
+      // שולחן אוכל (candles 165, table 238)
+      const tableDone = GameState.completed.has('table');
+      fillRoundRect(150, 352, 176, 12, 3, '#7a4a26');        // משטח שולחן
+      fillRoundRect(158, 364, 8, 36, 2, '#5e3a1e'); fillRoundRect(310, 364, 8, 36, 2, '#5e3a1e');
+      if (tableDone) {
+        fillRoundRect(150, 348, 176, 12, 3, '#f4efe3');      // מפה לבנה
+        for (let i = 0; i < 3; i++) { const px = 200 + i * 45; ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.ellipse(px, 350, 11, 4, 0, 0, 7); ctx.fill(); ctx.strokeStyle = '#cbb6d8'; ctx.lineWidth = 1; ctx.stroke(); }
+        fillRoundRect(276, 340, 34, 14, 3, '#d9b3e0');       // כיסוי חלה
+      }
+      // נרות (165) — על השולחן
+      const candDone = GameState.completed.has('candles');
+      for (let i = 0; i < 2; i++) {
+        const cx = 158 + i * 16, base = 350;
+        ctx.fillStyle = '#c9a94e'; fillRoundRect(cx - 4, base - 4, 8, 6, 1, '#c9a94e'); // פמוט
+        ctx.fillStyle = '#f0e6cf'; fillRoundRect(cx - 3, base - 24, 6, 20, 2, '#f0e6cf'); // נר
+        if (candDone) { ctx.save(); ctx.shadowColor = '#ffcf5a'; ctx.shadowBlur = 18; ctx.fillStyle = '#ffd76a'; ctx.beginPath(); ctx.ellipse(cx, base - 30, 5, 10, 0, 0, 7); ctx.fill(); ctx.fillStyle = '#fff1b8'; ctx.beginPath(); ctx.ellipse(cx, base - 28, 2.4, 5, 0, 0, 7); ctx.fill(); ctx.restore(); }
+        else { ctx.strokeStyle = '#7a6a3a'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(cx, base - 24); ctx.lineTo(cx, base - 28); ctx.stroke(); }
+      }
+    },
+
+    // ---------------- חדר שינה ----------------
+    drawBedroom(frac) {
+      this.shell('#8f84b0', '#7a6f9e', '#6a5c7e', '#4f4460');
+      this.window(348, 56, 84, 62, frac);
+      // תמונת קיר + שעון
+      fillRoundRect(70, 66, 58, 44, 5, '#5a4470'); fillRoundRect(76, 72, 46, 32, 3, '#a487bd');
+      ctx.fillStyle = '#efe9f2'; ctx.beginPath(); ctx.arc(180, 92, 16, 0, 7); ctx.fill();
+      ctx.strokeStyle = '#5a4470'; ctx.lineWidth = 2.5; ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(180, 92); ctx.lineTo(180, 82); ctx.moveTo(180, 92); ctx.lineTo(188, 94); ctx.stroke();
+      // מיטה (שמאל)
+      fillRoundRect(24, 300, 20, 100, 4, '#6b4a2a');          // ראש מיטה
+      fillRoundRect(28, 356, 150, 44, 5, '#8a76a6');          // מזרן/שמיכה
+      fillRoundRect(40, 344, 40, 22, 6, '#efe9f2');           // כרית
+      fillRoundRect(28, 356, 150, 10, 3, '#a48ec0');
+      // שטיח
+      fillRoundRect(120, 404, 150, 40, 8, '#5a4470');
+      // ניקיון (150) — בלגן על הרצפה או ניצוצות
+      if (GameState.completed.has('clean')) {
+        ctx.fillStyle = '#fff3c8';
+        [[120, 430], [175, 420], [150, 448], [200, 436]].forEach((pt, i) => { const a = this.t * 3 + i; ctx.globalAlpha = 0.5 + 0.5 * Math.sin(a); this.spark(pt[0], pt[1], 6); }); ctx.globalAlpha = 1;
+      } else {
+        this.blob(126, 430, '#c85a54'); this.blob(168, 422, '#4a7ec8'); this.blob(150, 448, '#d9a53a');
+      }
+      // ארון בגדים (322)
+      const clDone = GameState.completed.has('clothes');
+      fillRoundRect(282, 250, 82, 150, 5, '#6b4a2a');
+      ctx.strokeStyle = '#4a3320'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(323, 252); ctx.lineTo(323, 398); ctx.stroke();
+      ctx.fillStyle = '#d9b36a'; ctx.beginPath(); ctx.arc(318, 326, 2.5, 0, 7); ctx.fill(); ctx.beginPath(); ctx.arc(328, 326, 2.5, 0, 7); ctx.fill();
+      if (clDone) {                                            // ארון פתוח עם בגדי שבת
+        fillRoundRect(288, 256, 70, 138, 4, '#3a2c22');
+        fillRoundRect(300, 268, 22, 60, 4, '#f4f4f8');        // חולצה לבנה
+        ctx.fillStyle = '#33406b'; ctx.beginPath(); ctx.moveTo(310, 268); ctx.lineTo(314, 300); ctx.lineTo(306, 300); ctx.closePath(); ctx.fill(); // עניבה
+        fillRoundRect(328, 268, 24, 66, 4, '#5a3b7a');        // חליפה/שמלה כהה
+      }
+    },
+
+    // ---------------- כניסה / רחוב ----------------
+    drawEntrance(frac) {
+      this.shell('#b79a86', '#9c8069', '#6e5540', '#513d2c');
+      // שלט "שבת שלום" על הקיר
+      fillRoundRect(120, 66, 150, 46, 10, '#5a4632'); fillRoundRect(126, 72, 138, 34, 7, '#6e5540');
+      txt('שבת שלום 🕯️', 195, 90, { size: 19, color: '#f4c542', weight: '800' });
+      // דלת החוצה (ימין) עם רחוב מבעד
+      fillRoundRect(388, 236, 74, 164, 6, '#4a3320');
+      ctx.save(); roundRect(396, 244, 58, 120, 4); ctx.clip();
+      ctx.fillStyle = mixSky(frac); ctx.fillRect(396, 244, 58, 120);
+      const sunY = 250 + lerp(16, 90, 1 - frac); ctx.shadowColor = '#ffcf6a'; ctx.shadowBlur = 14; ctx.fillStyle = frac > 0.4 ? '#ffd66a' : '#ffe9c8'; ctx.beginPath(); ctx.arc(410, sunY, 9, 0, 7); ctx.fill(); ctx.shadowBlur = 0;
+      ctx.fillStyle = '#33405e'; ctx.fillRect(398, 320, 16, 44); ctx.fillRect(420, 306, 18, 58); ctx.fillRect(442, 326, 14, 38); // בניינים
+      ctx.fillStyle = '#f4c542'; ctx.fillRect(402, 328, 3, 3); ctx.fillRect(425, 316, 3, 3); ctx.fillRect(446, 332, 3, 3);
+      ctx.restore();
+      ctx.fillStyle = '#d9b36a'; ctx.beginPath(); ctx.arc(452, 322, 3, 0, 7); ctx.fill(); // ידית
+      // קולב מעילים (שמאל)
+      fillRoundRect(60, 250, 6, 120, 3, '#5a3f22'); ctx.fillStyle = '#5a3f22'; ctx.beginPath(); ctx.arc(48, 262, 4, 0, 7); ctx.arc(78, 262, 4, 0, 7); ctx.fill();
+      fillRoundRect(40, 268, 26, 50, 6, '#3f6ea3'); fillRoundRect(70, 268, 24, 46, 6, '#7a3b52'); // מעילים
+      // שטיח כניסה
+      fillRoundRect(150, 406, 150, 34, 6, '#4a5f4a'); txt('ברוכים הבאים', 225, 423, { size: 12, color: '#cfe0c8' });
+      // קניות (235)
+      if (GameState.completed.has('shop')) {
+        for (let i = 0; i < 3; i++) { const bx = 200 + i * 34; fillRoundRect(bx, 356, 28, 40, 4, ['#c26a4a', '#4a8ac2', '#6aa86a'][i]); fillRoundRect(bx + 4, 350, 6, 8, 2, '#7a5a3a'); fillRoundRect(bx + 18, 350, 6, 8, 2, '#7a5a3a'); txt(['🥖', '🥛', '🍎'][i], bx + 14, 376, { size: 16 }); }
+      } else {
+        // עגלת קניה ריקה + רשימה
+        ctx.strokeStyle = '#c9ccd2'; ctx.lineWidth = 3;
+        ctx.strokeRect(214, 350, 44, 30); ctx.beginPath(); ctx.moveTo(214, 350); ctx.lineTo(206, 342); ctx.stroke();
+        ctx.fillStyle = '#3a3a42'; ctx.beginPath(); ctx.arc(222, 388, 5, 0, 7); ctx.arc(250, 388, 5, 0, 7); ctx.fill();
+      }
+    },
+    spark(x, y, r) { ctx.beginPath(); for (let i = 0; i < 4; i++) { const a = i * Math.PI / 2; ctx.moveTo(x, y); ctx.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r); } ctx.strokeStyle = '#fff3c8'; ctx.lineWidth = 2; ctx.stroke(); },
+    blob(x, y, c) { ctx.fillStyle = c; ctx.beginPath(); ctx.ellipse(x, y, 9, 6, 0, 0, 7); ctx.fill(); },
+
     onPointer(x, y, type) {
-      if (type !== 'down') return;
-      for (const s of this.stations) {
+      if (type !== 'down' || this.trans > 0) return;
+      if (this.idx > 0 && x < 42) { this.changeRoom(-1); return; }
+      if (this.idx < this.rooms.length - 1 && x > DW - 42) { this.changeRoom(1); return; }
+      for (const s of this.room().stations) {
         if (GameState.completed.has(s.id)) continue;
-        if (Math.abs(x - s.x) < 28 && Math.abs(y - s.y) < 32) {
-          if (dist2(this.player.x, this.player.y, s.x, s.y) < 44 * 44) { const gm = s.game; this.clearTarget(); SceneManager.openGame(gm); }
-          else { this.targetStation = s; this.path = this.findPath(s.x, s.y); this.stuckT = 0; AudioManager.sfx('tap'); }
+        if (Math.abs(x - s.x) < 42 && y > 120) {
+          if (Math.abs(this.player.x - s.x) < 40) { const gm = s.game; this.clearTarget(); SceneManager.openGame(gm); }
+          else { this.targetStation = s; this.targetX = s.x; AudioManager.sfx('tap'); }
           return;
         }
       }
-      this.targetStation = null; this.path = this.findPath(x, y); this.stuckT = 0;
+      this.targetStation = null; this.targetX = clamp(x, 46, DW - 46);
     },
     onKey(k) {
       if ((k === 'Enter' || k === ' ') && this.nearStation) { const gm = this.nearStation.game; this.clearTarget(); SceneManager.openGame(gm); }
     },
   };
+
   function mixSky(frac) {
     // frac 1 (הרבה זמן) = כחול בהיר יום · frac 0 (סוף) = כחול-סגול ערב
     const day = [74, 106, 168], eve = [58, 40, 90];
@@ -1254,6 +1356,7 @@
      SceneManager — מעבר בין הבית למיני-משחקים
      ============================================================ */
   const CLOSE_BTN = { x: 8, y: 30, w: 40, h: 40 };
+  const PANEL = { x: 20, y: 66, w: DW - 40, h: DH - 150 };   // פאנל המשימה בתוך החדר
   const SceneManager = {
     openGame(game) {
       game.enter();
@@ -1266,6 +1369,7 @@
     finishGame(game) {
       const r = game.result;
       GameState.activeScene = null;
+      for (const k in heldKeys) heldKeys[k] = false;
       if (r && r.done && !r.failed) {
         GameState.completed.add(game.id);
         GameState.score += r.score;
@@ -1280,6 +1384,7 @@
     abort() {
       // יציאה מהמיני-משחק חזרה לבית בלי השלמה ובלי עונש
       GameState.activeScene = null;
+      for (const k in heldKeys) heldKeys[k] = false;
     },
     update(dt) {
       const s = GameState.activeScene;
@@ -1292,11 +1397,18 @@
     },
     render() {
       if (GameState.activeScene) {
-        // רקע מיני-משחק
+        // החדר נשאר גלוי מאחורי הפאנל — המשימה קורית "בתוך החדר"
+        Hub.renderBackdrop();
+        // מסגרת + פאנל המשימה
+        fillRoundRect(PANEL.x - 3, PANEL.y - 3, PANEL.w + 6, PANEL.h + 6, 18, 'rgba(244,197,66,0.9)');
+        ctx.save();
+        roundRect(PANEL.x, PANEL.y, PANEL.w, PANEL.h, 16); ctx.clip();
+        ctx.translate(PANEL.x, PANEL.y); ctx.scale(PANEL.w / DW, PANEL.h / DH);
         const g = ctx.createLinearGradient(0, 0, 0, DH);
         g.addColorStop(0, '#243869'); g.addColorStop(1, '#16224d');
         ctx.fillStyle = g; ctx.fillRect(0, 0, DW, DH);
         GameState.activeScene.render();
+        ctx.restore();
         // כפתור יציאה
         fillRoundRect(CLOSE_BTN.x, CLOSE_BTN.y, CLOSE_BTN.w, CLOSE_BTN.h, 10, 'rgba(255,255,255,0.12)');
         txt('✕', CLOSE_BTN.x + 20, CLOSE_BTN.y + 20, { size: 22, color: '#fff' });
@@ -1307,7 +1419,9 @@
     onPointer(x, y, type) {
       if (GameState.activeScene) {
         if (type === 'down' && pointInRect(x, y, CLOSE_BTN)) { this.abort(); AudioManager.sfx('tap'); return; }
-        GameState.activeScene.onPointer(x, y, type);
+        // מיפוי הפוך מקואורדינטות החדר למרחב-העיצוב של המשימה בתוך הפאנל
+        const mx = (x - PANEL.x) * DW / PANEL.w, my = (y - PANEL.y) * DH / PANEL.h;
+        GameState.activeScene.onPointer(mx, my, type);
       } else {
         Hub.onPointer(x, y, type);
       }
@@ -1390,7 +1504,7 @@
     GameState.score = 0; GameState.missed = 0;
     GameState.completed = new Set(); GameState.achievements = new Set();
     GameState.activeScene = null; GameState.screen = 'playing';
-    Hub.build(); Hub.selected = 0;
+    Hub.build();
     document.getElementById('screen-start').classList.add('hidden');
     document.getElementById('screen-end').classList.add('hidden');
     updateHUD();
@@ -1503,7 +1617,7 @@
   requestAnimationFrame(frame);
 
   // חשיפה קלה לבדיקות (Playwright)
-  window.__RTS__ = { GameState, ALL_GAMES, Hub, startGame, endGame };
+  window.__RTS__ = { GameState, ALL_GAMES, Hub, SceneManager, startGame, endGame };
 })();
 </script>
 </body>
