@@ -576,13 +576,8 @@
     },
     update(dt) {
       this.tickTimer(dt);
-      this.knead = clamp(this.knead - dt * 9, 0, 100);   // דעיכה — צריך להמשיך ללוש
+      this.knead = clamp(this.knead - dt * 5, 0, 100);   // דעיכה עדינה — צריך להמשיך ללוש
       this.squish = Math.max(0, this.squish - dt * 4);
-      if (this.knead >= 100) {
-        const bonus = Math.round(this.time * 6) + this.taps;
-        if (this.time > this.timeMax * 0.4) AchievementManager.unlock('speedy');
-        this.finish(150 + bonus, this.time > this.timeMax * 0.4);
-      }
     },
     render() {
       this.drawHeader('הכנת חלות 🍞');
@@ -604,9 +599,15 @@
       this.drawSubTimer();
     },
     doKnead() {
-      this.knead = clamp(this.knead + 8, 0, 100);
+      if (this.result) return;
+      this.knead = clamp(this.knead + 11, 0, 100);
       this.squish = 1; this.taps++;
       AudioManager.tone(200 + this.knead * 2, 0.06, 'sine', 0.15);
+      if (this.knead >= 100) {          // בדיקת סיום מיד עם המילוי (לפני הדעיכה בפריים הבא)
+        const bonus = Math.round(this.time * 6) + this.taps;
+        if (this.time > this.timeMax * 0.4) AchievementManager.unlock('speedy');
+        this.finish(150 + bonus, this.time > this.timeMax * 0.4);
+      }
     },
     onPointer(x, y, type) { if (type === 'down') this.doKnead(); },
     onKey(k) { if (k === ' ' || k === 'Enter') this.doKnead(); },
@@ -1007,34 +1008,44 @@
 
     build() {
       const g = {}; ALL_GAMES.forEach(x => g[x.id] = x);
+      // requires — סדר הכנות הגיוני לערב שבת:
+      //   קניות ← בישול/חלות/פרחים ← פלטה ← סידור שולחן ← (ניקיון/בגדים/ספרים חופשי) ← הדלקת נרות אחרונה
       this.rooms = [
         { id: 'kitchen', name: 'מטבח', stations: [
-          { id: 'challah', game: g.challah, x: 110, label: 'הכנת חלות' },
-          { id: 'cook', game: g.cook, x: 235, label: 'בישול חמין' },
-          { id: 'hotplate', game: g.hotplate, x: 340, label: 'הפעלת פלטה' },
+          { id: 'challah', game: g.challah, x: 110, label: 'הכנת חלות', requires: ['shop'] },
+          { id: 'cook', game: g.cook, x: 235, label: 'בישול חמין', requires: ['shop'] },
+          { id: 'hotplate', game: g.hotplate, x: 340, label: 'הפעלת פלטה', requires: ['cook'] },
         ] },
         { id: 'living', name: 'סלון ופינת אוכל', stations: [
-          { id: 'candles', game: g.candles, x: 165, label: 'הדלקת נרות' },
-          { id: 'table', game: g.table, x: 238, label: 'סידור השולחן' },
-          { id: 'flowers', game: g.flowers, x: 345, label: 'פרחים ויין' },
-          { id: 'books', game: g.books, x: 418, label: 'סידור ספרים' },
+          { id: 'candles', game: g.candles, x: 165, label: 'הדלקת נרות', requires: ['shop', 'challah', 'cook', 'hotplate', 'clean', 'clothes', 'books', 'flowers', 'table'] },
+          { id: 'table', game: g.table, x: 238, label: 'סידור השולחן', requires: ['challah', 'cook'] },
+          { id: 'flowers', game: g.flowers, x: 345, label: 'פרחים ויין', requires: ['shop'] },
+          { id: 'books', game: g.books, x: 418, label: 'סידור ספרים', requires: [] },
         ] },
         { id: 'bedroom', name: 'חדר שינה', stations: [
-          { id: 'clean', game: g.clean, x: 150, label: 'ניקיון' },
-          { id: 'clothes', game: g.clothes, x: 322, label: 'בגדי שבת' },
+          { id: 'clean', game: g.clean, x: 150, label: 'ניקיון', requires: [] },
+          { id: 'clothes', game: g.clothes, x: 322, label: 'בגדי שבת', requires: [] },
         ] },
         { id: 'entrance', name: 'כניסה', stations: [
-          { id: 'shop', game: g.shop, x: 235, label: 'קניות אחרונות' },
+          { id: 'shop', game: g.shop, x: 235, label: 'קניות אחרונות', requires: [] },
         ] },
       ];
-      this.idx = 1;
+      this.labels = {};
+      this.rooms.forEach(r => r.stations.forEach(s => { this.labels[s.id] = s.label; }));
+      this.idx = 3;                                  // מתחילים בכניסה — קודם יוצאים לקניות
       this.player = { x: DW / 2, vx: 0, face: 1, phase: 0, moving: false };
       this.targetX = null; this.targetStation = null; this.nearStation = null;
-      this.trans = 0; this.hintT = 7; this.built = true;
+      this.trans = 0; this.hintT = 8; this.built = true;
     },
 
     room() { return this.rooms[this.idx]; },
     clearTarget() { this.targetX = null; this.targetStation = null; },
+    missingReq(s) { return (s.requires || []).filter(id => !GameState.completed.has(id)); },
+    isLocked(s) { return this.missingReq(s).length > 0; },
+    tryOpen(s) {
+      if (this.isLocked(s)) { showToast('קודם צריך: ' + this.labels[this.missingReq(s)[0]]); AudioManager.sfx('error'); this.clearTarget(); return; }
+      const gm = s.game; this.clearTarget(); SceneManager.openGame(gm);
+    },
     changeRoom(dir) {
       const ni = this.idx + dir;
       if (ni < 0 || ni >= this.rooms.length) return;
@@ -1066,7 +1077,7 @@
       this.room().stations.forEach(s => { if (GameState.completed.has(s.id)) return; const d = Math.abs(p.x - s.x); if (d < bd) { bd = d; this.nearStation = s; } });
       // פתיחה אוטומטית כשמגיעים לתחנה שנבחרה בהקשה
       if (this.targetStation && !GameState.completed.has(this.targetStation.id) && Math.abs(p.x - this.targetStation.x) < 38) {
-        const gm = this.targetStation.game; this.clearTarget(); SceneManager.openGame(gm);
+        this.tryOpen(this.targetStation);
       }
     },
 
@@ -1077,14 +1088,22 @@
       this.drawRoomScene(frac);
       this.drawDoors();
       this.drawPlayer();
-      // הדגשת התחנה הקרובה + רמז
+      // מנעול על תחנות שעדיין נעולות (סדר המשימות)
+      this.room().stations.forEach(st => {
+        if (GameState.completed.has(st.id) || !this.isLocked(st)) return;
+        ctx.fillStyle = 'rgba(16,20,40,0.72)'; ctx.beginPath(); ctx.arc(st.x, this.FLOORY - 8, 11, 0, 7); ctx.fill();
+        txt('🔒', st.x, this.FLOORY - 8, { size: 13 });
+      });
+      // הדגשת התחנה הקרובה + רמז / הודעת נעילה
       const s = this.nearStation;
       if (s) {
-        ctx.save(); ctx.strokeStyle = 'rgba(244,197,66,0.9)'; ctx.lineWidth = 2;
+        const locked = this.isLocked(s);
+        ctx.save(); ctx.strokeStyle = locked ? 'rgba(150,150,170,0.9)' : 'rgba(244,197,66,0.9)'; ctx.lineWidth = 2;
         ctx.beginPath(); ctx.ellipse(s.x, this.FLOORY + 2, 34, 10, 0, 0, 7); ctx.stroke(); ctx.restore();
-        const by = 150 + Math.sin(this.t * 5) * 3;
-        fillRoundRect(s.x - 44, by, 88, 22, 11, 'rgba(244,197,66,0.96)');
-        txt('▶ ' + s.label, s.x, by + 11, { size: 12, color: '#3a2a05', weight: '800' });
+        const label = locked ? ('🔒 קודם: ' + this.labels[this.missingReq(s)[0]]) : ('▶ ' + s.label);
+        const w = Math.max(90, label.length * 8 + 18), by = 150 + Math.sin(this.t * 5) * 3, cx = clamp(s.x, w / 2 + 4, DW - w / 2 - 4);
+        fillRoundRect(cx - w / 2, by, w, 22, 11, locked ? 'rgba(70,74,96,0.95)' : 'rgba(244,197,66,0.96)');
+        txt(label, cx, by + 11, { size: 12, color: locked ? '#ffe9b0' : '#3a2a05', weight: '800' });
       }
       // שם החדר + מד חדר
       const total = this.room().stations.length;
@@ -1333,7 +1352,7 @@
       for (const s of this.room().stations) {
         if (GameState.completed.has(s.id)) continue;
         if (Math.abs(x - s.x) < 42 && y > 120) {
-          if (Math.abs(this.player.x - s.x) < 40) { const gm = s.game; this.clearTarget(); SceneManager.openGame(gm); }
+          if (Math.abs(this.player.x - s.x) < 40) { this.tryOpen(s); }
           else { this.targetStation = s; this.targetX = s.x; AudioManager.sfx('tap'); }
           return;
         }
@@ -1341,7 +1360,7 @@
       this.targetStation = null; this.targetX = clamp(x, 46, DW - 46);
     },
     onKey(k) {
-      if ((k === 'Enter' || k === ' ') && this.nearStation) { const gm = this.nearStation.game; this.clearTarget(); SceneManager.openGame(gm); }
+      if ((k === 'Enter' || k === ' ') && this.nearStation) this.tryOpen(this.nearStation);
     },
   };
 
