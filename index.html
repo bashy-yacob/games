@@ -117,6 +117,17 @@
   .ach-item { font-size: 14px; background: rgba(244,197,66,0.14); border-radius: 10px; padding: 7px 10px; text-align: right; }
   .instr { font-size: 14px; text-align: right; line-height: 1.7; opacity: 0.9; max-width: 340px; }
   .instr b { color: #f4c542; }
+  /* התאמה אישית */
+  .custom { display: flex; flex-direction: column; gap: 8px; background: rgba(255,255,255,0.06);
+    border: 1px solid #f4c54233; border-radius: 14px; padding: 10px 14px; }
+  .custom-line { display: flex; align-items: center; gap: 8px; justify-content: flex-start; }
+  .custom-label { font-size: 14px; font-weight: 700; min-width: 46px; text-align: right; }
+  .gender-btn { background: rgba(255,255,255,0.1); border: 2px solid transparent; color: #fff8e7;
+    border-radius: 12px; padding: 6px 12px; font-size: 14px; font-weight: 700; cursor: pointer; font-family: inherit; }
+  .gender-btn.active { border-color: #f4c542; background: rgba(244,197,66,0.18); }
+  .swatches { display: flex; gap: 6px; }
+  .swatch { width: 26px; height: 26px; border-radius: 50%; border: 3px solid transparent; cursor: pointer; padding: 0; }
+  .swatch.active { border-color: #f4c542; box-shadow: 0 0 0 2px rgba(0,0,0,0.3) inset; }
   /* Achievement toast */
   #toast {
     position: absolute; top: 12px; right: 50%; transform: translateX(50%) translateY(-140%);
@@ -158,6 +169,21 @@
           <button class="diff-btn" data-diff="hard">קשה<small>2:00 · מהיר</small></button>
           <button class="diff-btn" data-diff="practice">תרגול<small>בלי זמן</small></button>
         </div>
+        <div class="custom" id="custom">
+          <div class="custom-line">
+            <span class="custom-label">דמות:</span>
+            <button class="gender-btn active" data-gender="boy">👦 בן</button>
+            <button class="gender-btn" data-gender="girl">👧 בת</button>
+          </div>
+          <div class="custom-line">
+            <span class="custom-label" id="accent-label">כיפה:</span>
+            <span class="swatches" data-part="kippah"></span>
+          </div>
+          <div class="custom-line">
+            <span class="custom-label">חולצה:</span>
+            <span class="swatches" data-part="shirt"></span>
+          </div>
+        </div>
         <button class="btn" id="start-btn">התחלה ▶</button>
         <button class="btn secondary" id="fs-btn2">⛶ מסך מלא</button>
         <div class="instr">
@@ -166,7 +192,7 @@
           מתקרבים לתחנה ולוחצים <b>Enter</b> / מקישים כדי להתחיל משימה.<br>
           עוברים בין חדרים דרך הדלתות בצדדים.<br>
           יש סדר הכנות — קודם קניות, ובסוף הדלקת נרות 🕯️<br>
-          <b>שיא אישי:</b> <span id="start-high">0</span> ⭐
+          <b>שיא:</b> <span id="start-high">0</span> · <b>כוכבים:</b> <span id="start-stars">0</span> ⭐
         </div>
         <div class="credit">משחק משפחתי · עברית · פועל בכל דפדפן</div>
       </div>
@@ -178,6 +204,7 @@
         <div class="card">
           <div class="summary-row"><span>משימות שהושלמו</span><b id="end-tasks">0 / 10</b></div>
           <div class="summary-row"><span>ניקוד סופי</span><b id="end-score">0</b></div>
+          <div class="summary-row"><span>כוכבים במשחק</span><b id="end-stars">0</b></div>
           <div class="summary-row"><span>שיא אישי</span><b id="end-high">0</b></div>
           <div class="ach-list" id="end-ach"></div>
         </div>
@@ -296,6 +323,12 @@
         case 'candle': this.tone(300, 0.25, 'sine', 0.2); this.tone(450, 0.3, 'sine', 0.14, 0.05); break;
         case 'win':    [523, 587, 659, 784, 880, 1047].forEach((f, i) => this.tone(f, 0.3, 'sine', 0.22, i * 0.12)); break;
       }
+    },
+    finale() {
+      if (this.muted || !this.actx) return;
+      // ניגון חם ומתנגן לרגע הדלקת הנרות
+      const notes = [392, 523, 587, 659, 784, 659, 587, 523, 587, 659, 784, 880];
+      notes.forEach((f, i) => { this.tone(f, 0.55, 'sine', 0.16, i * 0.32); this.tone(f / 2, 0.6, 'sine', 0.08, i * 0.32); });
     },
     startBg() {
       if (this.bgTimer || !this.actx) return;
@@ -1105,9 +1138,14 @@
       this.drawRoomScene(frac);
       this.drawDoors();
       this.drawPlayer();
-      // מנעול על תחנות שעדיין נעולות (סדר המשימות)
+      // מנעול על תחנות נעולות · כוכבים על תחנות שהושלמו
       this.room().stations.forEach(st => {
-        if (GameState.completed.has(st.id) || !this.isLocked(st)) return;
+        if (GameState.completed.has(st.id)) {
+          const n = GameState.stars[st.id] || GameState.bestStars[st.id] || 1, sw2 = 13;
+          for (let i = 0; i < n; i++) txt('⭐', st.x - (n * sw2) / 2 + sw2 / 2 + i * sw2, 158, { size: 12 });
+          return;
+        }
+        if (!this.isLocked(st)) return;
         ctx.fillStyle = 'rgba(16,20,40,0.72)'; ctx.beginPath(); ctx.arc(st.x, this.FLOORY - 8, 11, 0, 7); ctx.fill();
         txt('🔒', st.x, this.FLOORY - 8, { size: 13 });
       });
@@ -1195,14 +1233,21 @@
       // רגליים
       ctx.save(); ctx.translate(-3, -2); ctx.rotate(sw * 0.35); fillRoundRect(-2.2, 0, 4.4, 11, 2, '#2f3d63'); ctx.restore();
       ctx.save(); ctx.translate(3, -2); ctx.rotate(-sw * 0.35); fillRoundRect(-2.2, 0, 4.4, 11, 2, '#2f3d63'); ctx.restore();
-      // גוף (חולצת שבת בהירה)
-      fillRoundRect(-7, -17, 14, 17, 5, '#f6f2e8');
-      fillRoundRect(-7, -6, 14, 6, 3, '#33406b');            // חגורה/מכנס עליון
+      const ch = GameState.char || DEFAULT_CHAR, girl = ch.gender === 'girl';
+      if (girl) {                                            // חצאית צנועה (בת)
+        ctx.fillStyle = ch.kippah; ctx.beginPath();
+        ctx.moveTo(-6, -4); ctx.lineTo(6, -4); ctx.lineTo(10, 8); ctx.lineTo(-10, 8); ctx.closePath(); ctx.fill();
+      }
+      // גוף (חולצת שבת)
+      fillRoundRect(-7, -17, 14, 17, 5, ch.shirt);
+      if (!girl) fillRoundRect(-7, -6, 14, 6, 3, '#33406b');  // חגורה (בן)
       // יד קדמית מתנדנדת
-      ctx.save(); ctx.translate(4.5, -15); ctx.rotate(-sw * 0.5); fillRoundRect(-2.3, 0, 4.6, 12, 2.3, '#f6f2e8'); ctx.restore();
+      ctx.save(); ctx.translate(4.5, -15); ctx.rotate(-sw * 0.5); fillRoundRect(-2.3, 0, 4.6, 12, 2.3, ch.shirt); ctx.restore();
       // ראש (סכמטי, בלי פרצוף)
+      if (girl) { ctx.fillStyle = '#6b4a2a'; ctx.beginPath(); ctx.arc(0, -22, 8.4, Math.PI * 0.12, Math.PI * 0.88); ctx.fill(); } // שיער
       ctx.fillStyle = '#f0c9a0'; ctx.beginPath(); ctx.arc(0, -23, 7, 0, 7); ctx.fill();
-      ctx.fillStyle = '#4a5ec8'; ctx.beginPath(); ctx.arc(0, -26, 6.6, Math.PI, 0); ctx.fill(); // כיפה
+      if (girl) { ctx.fillStyle = ch.kippah; ctx.beginPath(); ctx.arc(-4, -28, 2.6, 0, 7); ctx.fill(); }       // סרט
+      else { ctx.fillStyle = ch.kippah; ctx.beginPath(); ctx.arc(0, -26, 6.6, Math.PI, 0); ctx.fill(); }        // כיפה
       ctx.restore();
     },
 
@@ -1250,6 +1295,12 @@
       // תמונת קיר / מזרח
       fillRoundRect(44, 60, 76, 56, 5, '#6b4a2a'); fillRoundRect(50, 66, 64, 44, 3, '#3f6ea3');
       txt('מזרח', 82, 88, { size: 15, color: '#ffe9b0', weight: '800' });
+      // 🎁 קישוט שנפתח עם כוכבים: עציץ פרחים
+      if ((GameState.totalStars || 0) >= 12) {
+        fillRoundRect(104, 372, 20, 24, 4, '#b5642e');
+        ctx.fillStyle = '#3f8f5a'; [[114, 360, 9], [108, 366, 7], [120, 366, 7]].forEach(pt => { ctx.beginPath(); ctx.arc(pt[0], pt[1], pt[2], 0, 7); ctx.fill(); });
+        ctx.fillStyle = '#e05a7a'; ctx.beginPath(); ctx.arc(114, 358, 3, 0, 7); ctx.fill();
+      }
       // כוננית ספרים (418)
       fillRoundRect(392, 236, 60, 164, 5, '#5a3f22');
       for (let sy = 262; sy < 396; sy += 44) { ctx.fillStyle = '#3e2a16'; ctx.fillRect(394, sy, 56, 4); }
@@ -1335,6 +1386,11 @@
       // שלט "שבת שלום" על הקיר
       fillRoundRect(120, 66, 150, 46, 10, '#5a4632'); fillRoundRect(126, 72, 138, 34, 7, '#6e5540');
       txt('שבת שלום 🕯️', 195, 90, { size: 19, color: '#f4c542', weight: '800' });
+      // 🎁 קישוט שנפתח עם כוכבים: תמונת בית ממוסגרת
+      if ((GameState.totalStars || 0) >= 20) {
+        fillRoundRect(60, 150, 62, 48, 5, '#5a4632'); fillRoundRect(66, 156, 50, 36, 3, '#7fa8cc');
+        txt('🏡', 91, 174, { size: 22 });
+      }
       // דלת החוצה (ימין) עם רחוב מבעד
       fillRoundRect(388, 236, 74, 164, 6, '#4a3320');
       ctx.save(); roundRect(396, 244, 58, 120, 4); ctx.clip();
@@ -1408,13 +1464,25 @@
       for (const k in heldKeys) heldKeys[k] = false;
       if (r && r.done && !r.failed) {
         GameState.completed.add(game.id);
-        GameState.score += r.score;
-        AudioManager.sfx('success');
+        // דירוג כוכבים 1–3 (מושלם / טוב / הושלם)
+        const stars = r.perfect ? 3 : (r.score >= 178 ? 2 : 1);
+        GameState.stars[game.id] = stars;
+        if (!GameState.bestStars[game.id] || stars > GameState.bestStars[game.id]) {
+          GameState.bestStars[game.id] = stars; saveTrophies();
+          GameState.totalStars = Object.values(GameState.bestStars).reduce((a, b) => a + b, 0);
+        }
+        // קומבו — בונוס על רצף השלמות בלי כישלון
+        GameState.combo++;
+        const comboBonus = GameState.combo >= 2 ? (GameState.combo - 1) * 15 : 0;
+        GameState.score += r.score + comboBonus;
+        showToast('כל הכבוד! ' + '⭐'.repeat(stars) + (GameState.combo >= 3 ? '  ·  רצף x' + GameState.combo + '!' : ''));
+        AudioManager.sfx(stars === 3 ? 'perfect' : 'success');
         updateHUD();
-        checkAllDone();
+        if (game.id === 'candles' && GameState.completed.size >= ALL_GAMES.length) startFinale();
+        else checkAllDone();
       } else {
         // פספוס/יציאה בלי השלמה — התחנה נשארת פתוחה
-        if (r && r.failed) { showToast('נגמר הזמן למשימה — נסו שוב 🙂'); AudioManager.sfx('error'); }
+        if (r && r.failed) { showToast('נגמר הזמן למשימה — נסו שוב 🙂'); AudioManager.sfx('error'); GameState.combo = 0; }
       }
     },
     abort() {
@@ -1480,6 +1548,65 @@
   }
 
   /* ============================================================
+     Finale — רצף חגיגי של הדלקת נרות (המשימה האחרונה)
+     ============================================================ */
+  const Finale = {
+    t: 0, done: false,
+    start() { this.t = 0; this.done = false; GameState.screen = 'finale'; AudioManager.stopBg(); AudioManager.finale(); },
+    update(dt) { this.t += dt; if (this.t > 6.5) this.finish(); },
+    render() {
+      const g = ctx.createLinearGradient(0, 0, 0, DH);
+      g.addColorStop(0, '#241a3a'); g.addColorStop(1, '#0d0a1c');
+      ctx.fillStyle = g; ctx.fillRect(0, 0, DW, DH);
+      // ניצוצות עולים
+      for (let i = 0; i < 26; i++) {
+        const seed = i * 37, sx = (seed * 13 % DW), sp = 20 + (seed % 30);
+        const sy = DH - ((this.t * sp + seed * 7) % (DH + 40));
+        const a = 0.25 + 0.55 * Math.abs(Math.sin(seed + this.t * 2));
+        ctx.globalAlpha = a * clamp(this.t, 0, 1); ctx.fillStyle = '#ffd76a';
+        ctx.beginPath(); ctx.arc(sx, sy, 1.6, 0, 7); ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+      // שני נרות גדולים זוהרים
+      const cy = 300;
+      for (let i = 0; i < 2; i++) {
+        const cx = DW / 2 + (i === 0 ? -34 : 34);
+        ctx.fillStyle = '#c9a94e'; fillRoundRect(cx - 9, cy + 40, 18, 12, 3, '#c9a94e');
+        ctx.fillStyle = '#f0e6cf'; fillRoundRect(cx - 7, cy - 40, 14, 82, 4, '#f0e6cf');
+        const fl = 1 + Math.sin(this.t * 8 + i * 2) * 0.12;
+        ctx.save(); ctx.shadowColor = '#ffcf5a'; ctx.shadowBlur = 40; ctx.fillStyle = '#ffd76a';
+        ctx.beginPath(); ctx.ellipse(cx, cy - 52, 9 * fl, 20 * fl, 0, 0, 7); ctx.fill();
+        ctx.shadowBlur = 12; ctx.fillStyle = '#fff3c0'; ctx.beginPath(); ctx.ellipse(cx, cy - 50, 4 * fl, 11 * fl, 0, 0, 7); ctx.fill();
+        ctx.restore();
+      }
+      // הילה חמה סביב הנרות
+      const halo = ctx.createRadialGradient(DW / 2, cy - 40, 10, DW / 2, cy - 40, 190);
+      halo.addColorStop(0, 'rgba(255,207,90,0.28)'); halo.addColorStop(1, 'rgba(255,207,90,0)');
+      ctx.fillStyle = halo; ctx.fillRect(0, 0, DW, DH);
+      // טקסטים מתפוגגים
+      ctx.globalAlpha = clamp((this.t - 0.2) / 0.8, 0, 1);
+      txt('שבת שלום', DW / 2, 120, { size: 46, color: '#f4c542', weight: '800', shadow: '#000', blur: 12 });
+      ctx.globalAlpha = 1;
+      if (this.t > 1.4) {
+        ctx.globalAlpha = clamp((this.t - 1.4) / 1, 0, 1);
+        txt('בָּרוּךְ אַתָּה ה׳ אֱלֹקֵינוּ מֶלֶךְ הָעוֹלָם', DW / 2, 428, { size: 16, color: '#ffe9b0' });
+        txt('אֲשֶׁר קִדְּשָׁנוּ בְּמִצְוֺתָיו וְצִוָּנוּ', DW / 2, 456, { size: 16, color: '#ffe9b0' });
+        txt('לְהַדְלִיק נֵר שֶׁל שַׁבָּת', DW / 2, 486, { size: 19, color: '#f4c542', weight: '800' });
+        ctx.globalAlpha = 1;
+      }
+      if (this.t > 2.8) { ctx.globalAlpha = 0.5 + 0.5 * Math.sin(this.t * 4); txt('לחצו להמשך ▶', DW / 2, DH - 40, { size: 14, color: '#cfe0ff' }); ctx.globalAlpha = 1; }
+    },
+    finish() {
+      if (this.done) return; this.done = true;
+      AchievementManager.unlock('allTasks');
+      if (GameState.difficulty !== 'practice') AchievementManager.unlock('earlyFinish');
+      endGame('all');
+    },
+    onInput() { if (this.t > 1) this.finish(); },
+  };
+  function startFinale() { Finale.start(); }
+
+  /* ============================================================
      Renderer — לולאה ראשית
      ============================================================ */
   let lastT = 0;
@@ -1495,6 +1622,9 @@
       SceneManager.update(dt);
       SceneManager.render();
       updateHUD();
+    } else if (GameState.screen === 'finale') {
+      Finale.update(dt);
+      Finale.render();
     }
     requestAnimationFrame(frame);
   }
@@ -1532,12 +1662,26 @@
     return false;
   }
 
+  // ---------- התאמה אישית + גביעים (localStorage) ----------
+  const DEFAULT_CHAR = { kippah: '#4a5ec8', shirt: '#f6f2e8', gender: 'boy' };
+  function loadChar() {
+    try { GameState.char = Object.assign({}, DEFAULT_CHAR, JSON.parse(localStorage.getItem('raceToShabbat.char') || '{}')); }
+    catch (e) { GameState.char = Object.assign({}, DEFAULT_CHAR); }
+  }
+  function saveChar() { try { localStorage.setItem('raceToShabbat.char', JSON.stringify(GameState.char)); } catch (e) {} }
+  function loadTrophies() {
+    try { GameState.bestStars = JSON.parse(localStorage.getItem('raceToShabbat.bestStars') || '{}') || {}; } catch (e) { GameState.bestStars = {}; }
+    GameState.totalStars = Object.values(GameState.bestStars).reduce((a, b) => a + b, 0);
+    const el = document.getElementById('start-stars'); if (el) el.textContent = GameState.totalStars;
+  }
+  function saveTrophies() { try { localStorage.setItem('raceToShabbat.bestStars', JSON.stringify(GameState.bestStars)); } catch (e) {} }
+
   function startGame() {
     AudioManager.init(); AudioManager.resume(); AudioManager.startBg();
     const d = DIFF[GameState.difficulty];
     GameState.mainTimerMax = d.time === Infinity ? 0 : d.time;
     GameState.mainTimer = d.time === Infinity ? 0 : d.time;
-    GameState.score = 0; GameState.missed = 0;
+    GameState.score = 0; GameState.missed = 0; GameState.combo = 0; GameState.stars = {};
     GameState.completed = new Set(); GameState.achievements = new Set();
     GameState.activeScene = null; GameState.screen = 'playing';
     Hub.build();
@@ -1547,7 +1691,7 @@
   }
 
   function endGame(reason) {
-    if (GameState.screen !== 'playing') return;
+    if (GameState.screen === 'end') return;   // מותר גם מ-playing וגם מ-finale
     GameState.screen = 'end';
     GameState.endReason = reason;
     GameState.activeScene = null;
@@ -1562,6 +1706,8 @@
     const done = GameState.completed.size, total = ALL_GAMES.length;
     document.getElementById('end-tasks').textContent = done + ' / ' + total;
     document.getElementById('end-score').textContent = GameState.score;
+    const runStars = Object.values(GameState.stars).reduce((a, b) => a + b, 0);
+    document.getElementById('end-stars').textContent = '⭐ ' + runStars + '  (סה״כ ' + GameState.totalStars + ')';
     document.getElementById('end-high').textContent = GameState.highScore;
     let title, sub;
     if (reason === 'all') { title = 'הכל מוכן — שבת שלום! 🌟'; sub = 'הספקת/ה להכין את כל הבית לשבת. כל הכבוד!'; }
@@ -1593,7 +1739,10 @@
     const r = canvas.getBoundingClientRect();
     return { x: (clientX - r.left) / r.width * DW, y: (clientY - r.top) / r.height * DH };
   }
-  function route(x, y, type) { if (GameState.screen === 'playing') SceneManager.onPointer(x, y, type); }
+  function route(x, y, type) {
+    if (GameState.screen === 'playing') SceneManager.onPointer(x, y, type);
+    else if (GameState.screen === 'finale' && type === 'down') Finale.onInput();
+  }
 
   canvas.addEventListener('mousedown', e => { const p = canvasPoint(e.clientX, e.clientY); route(p.x, p.y, 'down'); });
   canvas.addEventListener('mousemove', e => { const p = canvasPoint(e.clientX, e.clientY); route(p.x, p.y, 'move'); });
@@ -1607,6 +1756,8 @@
     if (GameState.screen === 'playing') {
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].indexOf(e.key) >= 0) e.preventDefault();
       SceneManager.onKey(e.key);
+    } else if (GameState.screen === 'finale' && (e.key === 'Enter' || e.key === ' ')) {
+      Finale.onInput();
     }
   });
   window.addEventListener('keyup', e => { heldKeys[e.key] = false; });
@@ -1660,20 +1811,53 @@
     AudioManager.stopBg();
     document.getElementById('screen-end').classList.add('hidden');
     document.getElementById('screen-start').classList.remove('hidden');
-    loadHigh();
+    loadHigh(); loadTrophies();
   });
+
+  // ---------- התאמה אישית (בחירת דמות) ----------
+  const KIPPAH_COLORS = ['#4a5ec8', '#c85a54', '#5aa86a', '#2a2a33', '#8a5ac8'];
+  const SHIRT_COLORS = ['#f6f2e8', '#bfe0f4', '#e8d7f0', '#f4e2c0', '#cfe8d0'];
+  function buildSwatches() {
+    document.querySelectorAll('.swatches').forEach(host => {
+      const part = host.dataset.part, colors = part === 'kippah' ? KIPPAH_COLORS : SHIRT_COLORS;
+      host.innerHTML = '';
+      colors.forEach(col => {
+        const b = document.createElement('button');
+        b.className = 'swatch'; b.style.background = col;
+        if (GameState.char[part] === col) b.classList.add('active');
+        b.addEventListener('click', () => {
+          GameState.char[part] = col; saveChar();
+          host.querySelectorAll('.swatch').forEach(x => x.classList.remove('active'));
+          b.classList.add('active');
+        });
+        host.appendChild(b);
+      });
+    });
+    document.querySelectorAll('.gender-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.gender === GameState.char.gender);
+      b.addEventListener('click', () => {
+        GameState.char.gender = b.dataset.gender; saveChar();
+        document.querySelectorAll('.gender-btn').forEach(x => x.classList.toggle('active', x === b));
+        document.getElementById('accent-label').textContent = GameState.char.gender === 'girl' ? 'סרט:' : 'כיפה:';
+      });
+    });
+    document.getElementById('accent-label').textContent = GameState.char.gender === 'girl' ? 'סרט:' : 'כיפה:';
+  }
 
   window.addEventListener('resize', doResize);
   window.addEventListener('orientationchange', doResize);
 
   // ---------- אתחול ----------
   AudioManager.loadMute();
+  loadChar();
+  loadTrophies();
   loadHigh();
+  buildSwatches();
   doResize();
   requestAnimationFrame(frame);
 
   // חשיפה קלה לבדיקות (Playwright)
-  window.__RTS__ = { GameState, ALL_GAMES, Hub, SceneManager, startGame, endGame };
+  window.__RTS__ = { GameState, ALL_GAMES, Hub, SceneManager, Finale, startGame, endGame };
 })();
 </script>
 </body>
