@@ -2,8 +2,11 @@
 <html dir="rtl" lang="he">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#1a2a5e">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>מירוץ לשבת 🕯️</title>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -21,13 +24,24 @@
   }
   #stage {
     position: relative;
-    width: 100%; height: 100%;
-    max-width: 480px; max-height: 760px;
+    /* ממלא את גובה המסך; הרוחב מוגבל ליחס דיוקן כדי שלא יימתח לרוחב במסך רחב */
+    height: 100vh; height: 100dvh;
+    width: min(100vw, calc(100vh * 480 / 760));
+    width: min(100vw, calc(100dvh * 480 / 760));
     display: flex; flex-direction: column;
     box-shadow: 0 0 60px rgba(0,0,0,0.5);
     background: #16224d;
     overflow: hidden;
   }
+  /* במסך מלא אמיתי — בלי צל, ממלא הכל */
+  #app:fullscreen, :fullscreen #stage { box-shadow: none; }
+  #fs-btn {
+    flex: 0 0 auto; background: rgba(255,255,255,0.1);
+    border: 1px solid #f4c54244; color: #fff8e7;
+    width: 40px; height: 40px; border-radius: 50%; font-size: 18px;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+  }
+  #fs-btn:active { transform: scale(0.92); }
   /* HUD */
   #hud {
     display: flex; align-items: center; gap: 8px;
@@ -127,6 +141,7 @@
       </div>
       <div class="hud-box">⭐ <span id="score-txt">0</span></div>
       <button id="mute-btn" title="השתקה">🔊</button>
+      <button id="fs-btn" title="מסך מלא">⛶</button>
     </div>
 
     <div id="canvas-wrap">
@@ -144,11 +159,13 @@
           <button class="diff-btn" data-diff="practice">תרגול<small>בלי זמן</small></button>
         </div>
         <button class="btn" id="start-btn">התחלה ▶</button>
+        <button class="btn secondary" id="fs-btn2">⛶ מסך מלא</button>
         <div class="instr">
           <b>איך משחקים:</b><br>
-          לחצו על תחנה בבית כדי לפתוח מיני-משחק.<br>
-          כל משימה שתשלימו ממלאת את מד ההכנות לשבת.<br>
-          אפשר גם לנווט בחיצים ⬆⬇⬅➡ ולפתוח ב-Enter.<br>
+          מהלכים בבית עם חיצים ←→ (או הקשה על הרצפה).<br>
+          מתקרבים לתחנה ולוחצים <b>Enter</b> / מקישים כדי להתחיל משימה.<br>
+          עוברים בין חדרים דרך הדלתות בצדדים.<br>
+          יש סדר הכנות — קודם קניות, ובסוף הדלקת נרות 🕯️<br>
           <b>שיא אישי:</b> <span id="start-high">0</span> ⭐
         </div>
         <div class="credit">משחק משפחתי · עברית · פועל בכל דפדפן</div>
@@ -1609,6 +1626,26 @@
 
   // ---------- חיווט UI ----------
   document.getElementById('mute-btn').addEventListener('click', () => { AudioManager.init(); AudioManager.toggleMute(); });
+
+  // מסך מלא
+  function fsSupported() { const el = document.getElementById('app'); return !!(el.requestFullscreen || el.webkitRequestFullscreen); }
+  function toggleFullscreen() {
+    const el = document.getElementById('app');
+    const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+    if (!fsEl) { (el.requestFullscreen || el.webkitRequestFullscreen || function () {}).call(el); }
+    else { (document.exitFullscreen || document.webkitExitFullscreen || function () {}).call(document); }
+  }
+  function onFsChange() {
+    const on = !!(document.fullscreenElement || document.webkitFullscreenElement);
+    document.getElementById('fs-btn').textContent = on ? '🗗' : '⛶';
+    const b2 = document.getElementById('fs-btn2'); if (b2) b2.textContent = on ? '🗗 יציאה ממסך מלא' : '⛶ מסך מלא';
+    setTimeout(doResize, 120);
+  }
+  document.getElementById('fs-btn').addEventListener('click', toggleFullscreen);
+  { const b2 = document.getElementById('fs-btn2'); if (b2) b2.addEventListener('click', toggleFullscreen); }
+  document.addEventListener('fullscreenchange', onFsChange);
+  document.addEventListener('webkitfullscreenchange', onFsChange);
+  if (!fsSupported()) { document.getElementById('fs-btn').style.display = 'none'; const b2 = document.getElementById('fs-btn2'); if (b2) b2.style.display = 'none'; }
   document.querySelectorAll('.diff-btn').forEach(b => {
     b.addEventListener('click', () => {
       document.querySelectorAll('.diff-btn').forEach(x => x.classList.remove('active'));
