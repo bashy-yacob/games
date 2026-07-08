@@ -369,6 +369,7 @@
         case 'collect':this.tone(700, 0.09, 'triangle', 0.22); this.tone(950, 0.09, 'triangle', 0.16, 0.05); break;
         case 'perfect':[659, 880, 1175, 1319].forEach((f, i) => this.tone(f, 0.2, 'triangle', 0.2, i * 0.06)); break;
         case 'candle': this.tone(300, 0.25, 'sine', 0.2); this.tone(450, 0.3, 'sine', 0.14, 0.05); break;
+        case 'knock':  this.tone(230, 0.09, 'sine', 0.3); this.tone(230, 0.09, 'sine', 0.26, 0.14); break;
         case 'win':    [523, 587, 659, 784, 880, 1047].forEach((f, i) => this.tone(f, 0.3, 'sine', 0.22, i * 0.12)); break;
       }
     },
@@ -412,6 +413,7 @@
     earlyFinish:    '⏱️ מוכנים עוד לפני הזמן',
     highScore:      '🏆 שיא אישי חדש!',
     speedy:         '⚡ משימה במהירות הבזק',
+    goodHost:       '🤝 מכניס/ת אורחים למופת',
   };
   const AchievementManager = {
     unlock(id) {
@@ -1281,6 +1283,64 @@
      ============================================================ */
   const heldKeys = {};                          // מקשים מוחזקים לתנועה רציפה
 
+  /* ============================================================
+     Guests — מיני-אירועים "אורחים לשבת": מדי פעם מופיע אירוע
+     (דפיקה בדלת, טלפון, שכן…) שצריך לטפל בו בזמן. הקשה/Enter
+     בזמן = בונוס ניקוד; פספוס = האורח הולך, בלי בונוס.
+     ============================================================ */
+  const GUEST_EVENTS = [
+    { icon: '🚪', prompt: 'אורח בדלת! פִּתחו',    ok: 'ברוך הבא! 🤝' },
+    { icon: '📞', prompt: 'סבתא בטלפון! ענו',    ok: 'שבת שלום מסבתא! 💛' },
+    { icon: '🍰', prompt: 'השכן הביא עוגה! קחו', ok: 'תודה רבה! 🍰' },
+    { icon: '👶', prompt: 'התינוק התעורר! הרגיעו', ok: 'נרדם בחזרה 😴' },
+    { icon: '🧺', prompt: 'הכביסה יבשה! אספו',   ok: 'מקופל ומסודר ✨' },
+  ];
+  const Guests = {
+    ev: null, cd: 0, count: 0, bonusTotal: 0,
+    reset() { this.ev = null; this.count = 0; this.bonusTotal = 0; this.cd = 12 + Math.random() * 8; },
+    win() { return ({ easy: 6, medium: 5, hard: 4, practice: 6 })[GameState.difficulty] || 5; },
+    spawn() {
+      const e = GUEST_EVENTS[(Math.random() * GUEST_EVENTS.length) | 0];
+      const life = this.win(), text = e.icon + ' ' + e.prompt;
+      const w = Math.max(150, text.length * 8.5 + 26);
+      this.ev = { icon: e.icon, prompt: e.prompt, ok: e.ok, life, max: life, rect: { x: DW / 2 - w / 2, y: 40, w, h: 30 } };
+      AudioManager.sfx('knock');
+    },
+    update(dt) {
+      if (GameState.screen !== 'playing' || GameState.activeScene) return;
+      if (this.ev) {
+        this.ev.life -= dt;
+        if (this.ev.life <= 0) { this.ev = null; this.cd = 14 + Math.random() * 10; showToast('האורח לא חיכה... 🙁'); AudioManager.sfx('error'); }
+        return;
+      }
+      // ללא אירוע פעיל — לא סמוך לסוף הזמן, ולא כשכבר סיימנו הכל
+      if (GameState.completed.size >= ALL_GAMES.length) return;
+      if (GameState.difficulty !== 'practice' && GameState.mainTimer < 12) return;
+      this.cd -= dt;
+      if (this.cd <= 0) this.spawn();
+    },
+    handle() {
+      if (!this.ev) return false;
+      const fast = this.ev.life > this.ev.max * 0.5, bonus = fast ? 35 : 22;
+      GameState.score += bonus; this.bonusTotal += bonus; this.count++;
+      showToast(this.ev.ok + '  +' + bonus);
+      AudioManager.sfx(fast ? 'perfect' : 'collect');
+      if (this.count >= 3) AchievementManager.unlock('goodHost');
+      this.ev = null; this.cd = 16 + Math.random() * 10;
+      updateHUD();
+      return true;
+    },
+    hitTest(x, y) { return !!this.ev && pointInRect(x, y, this.ev.rect); },
+    render() {
+      const e = this.ev; if (!e) return;
+      const r = e.rect, bounce = Math.sin(Hub.t * 6) * 2;
+      fillRoundRect(r.x, r.y + bounce, r.w, r.h, 15, 'rgba(199,90,42,0.96)');
+      txt(e.icon + ' ' + e.prompt, DW / 2, r.y + r.h / 2 + bounce, { size: 13, color: '#fff8e7', weight: '800' });
+      const f = clamp(e.life / e.max, 0, 1);
+      fillRoundRect(r.x + 8, r.y + r.h - 6 + bounce, (r.w - 16) * f, 3, 1.5, '#ffe08a');
+    },
+  };
+
   const Hub = {
     t: 0, built: false, hintT: 7,
     FLOORY: 400, baseY: 474,                     // גובה הרצפה + קו הרגליים של הדמות
@@ -1317,6 +1377,7 @@
       this.player = { x: DW / 2, vx: 0, face: 1, phase: 0, moving: false };
       this.targetX = null; this.targetStation = null; this.nearStation = null;
       this.trans = 0; this.hintT = 8; this.built = true;
+      Guests.reset();
     },
 
     room() { return this.rooms[this.idx]; },
@@ -1408,6 +1469,7 @@
         ctx.globalAlpha = 1;
       }
       if (this.trans > 0) { ctx.fillStyle = 'rgba(10,14,30,' + this.trans.toFixed(2) + ')'; ctx.fillRect(0, 0, DW, DH); }
+      Guests.render();
     },
     renderBackdrop() {
       this.drawRoomScene(this.frac());
@@ -1681,6 +1743,7 @@
 
     onPointer(x, y, type) {
       if (type !== 'down' || this.trans > 0) return;
+      if (Guests.hitTest(x, y)) { Guests.handle(); return; }   // אורח בדלת — עדיפות
       if (this.idx > 0 && x < 42) { this.changeRoom(-1); return; }
       if (this.idx < this.rooms.length - 1 && x > DW - 42) { this.changeRoom(1); return; }
       for (const s of this.room().stations) {
@@ -1694,6 +1757,7 @@
       this.targetStation = null; this.targetX = clamp(x, 46, DW - 46);
     },
     onKey(k) {
+      if ((k === 'Enter' || k === ' ') && Guests.handle()) return;   // אורח בדלת — עדיפות
       if ((k === 'Enter' || k === ' ') && this.nearStation) this.tryOpen(this.nearStation);
     },
   };
@@ -1762,6 +1826,7 @@
         if (s.result) this.finishGame(s);
       } else {
         Hub.update(dt);
+        Guests.update(dt);
       }
     },
     render() {
@@ -2043,6 +2108,7 @@
     } else {
       shareBtn.classList.add('hidden');
     }
+    if (Guests.count > 0) sub += ' · אירחת ' + Guests.count + ' אורחים 🤝';
     document.getElementById('end-title').textContent = title;
     document.getElementById('end-sub').textContent = sub;
 
@@ -2203,7 +2269,7 @@
   requestAnimationFrame(frame);
 
   // חשיפה קלה לבדיקות (Playwright)
-  window.__RTS__ = { GameState, ALL_GAMES, Hub, SceneManager, Finale, startGame, endGame };
+  window.__RTS__ = { GameState, ALL_GAMES, Hub, SceneManager, Finale, Guests, startGame, endGame };
 })();
 </script>
 </body>
