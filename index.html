@@ -110,6 +110,13 @@
   }
   .diff-btn.active { border-color: #f4c542; background: rgba(244,197,66,0.18); }
   .diff-btn small { display: block; font-size: 11px; opacity: 0.75; font-weight: 500; margin-top: 2px; }
+  .season-row { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+  .season-btn {
+    background: rgba(255,255,255,0.07); border: 2px solid rgba(255,255,255,0.16);
+    color: #eaf3ff; border-radius: 11px; padding: 7px 11px; font-size: 13px;
+    font-weight: 700; cursor: pointer; font-family: inherit;
+  }
+  .season-btn.active { border-color: #7fb0e8; background: rgba(127,176,232,0.2); }
   .card {
     background: rgba(255,255,255,0.06); border: 1px solid #f4c54233;
     border-radius: 16px; padding: 14px 18px; max-width: 360px; width: 100%;
@@ -171,6 +178,13 @@
           <button class="diff-btn active" data-diff="medium">בינונית<small>2:30 · רגיל</small></button>
           <button class="diff-btn" data-diff="hard">קשה<small>2:00 · מהיר</small></button>
           <button class="diff-btn" data-diff="practice">תרגול<small>בלי זמן</small></button>
+        </div>
+        <div class="season-row" id="season-row">
+          <button class="season-btn active" data-season="auto">🗓️ לפי היום</button>
+          <button class="season-btn" data-season="spring">🌸 אביב</button>
+          <button class="season-btn" data-season="summer">☀️ קיץ</button>
+          <button class="season-btn" data-season="autumn">🍂 סתיו</button>
+          <button class="season-btn" data-season="winter">🌧️ חורף</button>
         </div>
         <div class="custom" id="custom">
           <div class="custom-line">
@@ -282,6 +296,8 @@
   const GameState = {
     screen: 'start',            // 'start' | 'playing' | 'end'
     difficulty: 'medium',
+    season: 'auto',             // בחירת שחקן: 'auto' | 'spring' | 'summer' | 'autumn' | 'winter'
+    activeSeason: null,         // אובייקט העונה הפעילה בריצה (נקבע ב-startGame)
     mainTimer: 150, mainTimerMax: 150,
     score: 0,
     missed: 0,                  // כמה משימות/פריטים פוספסו
@@ -298,6 +314,22 @@
     hard:     { time: 120, subMul: 0.78 },
     practice: { time: Infinity, subMul: 1.35 },
   };
+
+  // ---------- עונות ומזג אוויר ----------
+  // כל עונה משנה את שעת השקיעה (timeMul על הזמן הראשי), את פלטת השמיים
+  // (day = הרבה זמן/יום · eve = סוף/ערב), את צבע השמש ואת האפקט בחלונות.
+  const SEASONS = {
+    spring: { label: 'אביב', emoji: '🌸', timeMul: 1.0,  day: [104, 158, 216], eve: [126, 92, 150],  sun: '#ffe07a', weather: 'petals', note: 'שבת רגילה' },
+    summer: { label: 'קיץ',  emoji: '☀️', timeMul: 1.2,  day: [86, 152, 224],  eve: [236, 142, 78],  sun: '#ffd24a', weather: 'clear',  note: 'שבת נכנסת מאוחר — יותר זמן' },
+    autumn: { label: 'סתיו', emoji: '🍂', timeMul: 0.95, day: [138, 144, 176], eve: [184, 98, 62],   sun: '#f0983a', weather: 'leaves', note: 'ימים מתקצרים' },
+    winter: { label: 'חורף', emoji: '🌧️', timeMul: 0.82, day: [96, 120, 152],  eve: [66, 72, 108],   sun: '#cfe0ef', weather: 'rain',   note: 'שבת נכנסת מוקדם — פחות זמן' },
+  };
+  const MONTH_SEASON = ['winter','winter','spring','spring','spring','summer','summer','summer','autumn','autumn','autumn','winter'];
+  function autoSeasonId(d) { return MONTH_SEASON[(d || new Date()).getMonth()]; }
+  function resolveSeasonId(choice, daily) {
+    if (daily || !choice || choice === 'auto' || !SEASONS[choice]) return autoSeasonId();
+    return choice;
+  }
 
   // ---------- AudioManager ----------
   const AudioManager = {
@@ -1403,15 +1435,41 @@
       for (let i = 1; i < 6; i++) { const y = this.FLOORY + (DH - this.FLOORY) * (i / 6); ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(DW, y); ctx.stroke(); }
     },
     window(x, y, w, h, frac) {
+      const season = GameState.activeSeason || SEASONS.spring;
       fillRoundRect(x - 5, y - 5, w + 10, h + 10, 7, '#5a4632');
       ctx.save(); roundRect(x, y, w, h, 3); ctx.clip();
       ctx.fillStyle = mixSky(frac); ctx.fillRect(x, y, w, h);
       const sunY = y + lerp(h * 0.18, h * 0.82, 1 - frac);
-      ctx.shadowColor = '#ffcf6a'; ctx.shadowBlur = 16; ctx.fillStyle = frac > 0.4 ? '#ffd66a' : '#ffe9c8';
+      ctx.shadowColor = '#ffcf6a'; ctx.shadowBlur = 16; ctx.fillStyle = frac > 0.4 ? season.sun : '#ffe9c8';
       ctx.beginPath(); ctx.arc(x + w * 0.5, sunY, 12, 0, 7); ctx.fill();
+      ctx.shadowBlur = 0;
+      this.drawWeather(x, y, w, h, season.weather);
       ctx.restore();
       ctx.strokeStyle = '#5a4632'; ctx.lineWidth = 3; ctx.strokeRect(x, y, w, h);
       ctx.beginPath(); ctx.moveTo(x + w / 2, y); ctx.lineTo(x + w / 2, y + h); ctx.moveTo(x, y + h / 2); ctx.lineTo(x + w, y + h / 2); ctx.stroke();
+    },
+    // אפקט מזג אוויר בתוך זגוגית החלון (מצויר בתוך ה-clip של החלון)
+    drawWeather(x, y, w, h, type) {
+      if (type === 'clear') return;
+      const t = this.t, N = 14, fr = n => n - Math.floor(n);
+      for (let i = 0; i < N; i++) {
+        const px = x + fr(i * 0.6180339) * w;
+        if (type === 'rain') {
+          const py = y + fr(i * 0.37 + t * 0.95) * h;
+          ctx.strokeStyle = 'rgba(190,212,240,0.55)'; ctx.lineWidth = 1.4;
+          ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px - 2.5, py + 8); ctx.stroke();
+        } else if (type === 'snow') {
+          const py = y + fr(i * 0.37 + t * 0.16) * h, dx = Math.sin(t * 1.4 + i) * 3;
+          ctx.fillStyle = 'rgba(255,255,255,0.9)';
+          ctx.beginPath(); ctx.arc(px + dx, py, 1.8, 0, 7); ctx.fill();
+        } else { // 'leaves' | 'petals'
+          const py = y + fr(i * 0.37 + t * 0.22) * h, dx = Math.sin(t * 1.1 + i * 1.3) * 5;
+          const cols = type === 'leaves' ? ['#c8642e', '#d99a3a', '#a5502a'] : ['#f2b6cf', '#f7cfe0', '#e79ac0'];
+          ctx.save(); ctx.translate(px + dx, py); ctx.rotate(t + i);
+          ctx.fillStyle = cols[i % 3]; ctx.beginPath(); ctx.ellipse(0, 0, 2.6, 1.5, 0, 0, 7); ctx.fill();
+          ctx.restore();
+        }
+      }
     },
     drawDoors() {
       const dy = this.FLOORY - 118;
@@ -1641,9 +1699,9 @@
   };
 
   function mixSky(frac) {
-    // frac 1 (הרבה זמן) = כחול בהיר יום · frac 0 (סוף) = כחול-סגול ערב
-    const day = [74, 106, 168], eve = [58, 40, 90];
-    const c = day.map((d, i) => Math.round(lerp(eve[i], d, frac)));
+    // frac 1 (הרבה זמן) = צבע היום · frac 0 (סוף) = צבע הערב — לפי העונה הפעילה
+    const s = GameState.activeSeason || SEASONS.spring;
+    const c = s.day.map((d, i) => Math.round(lerp(s.eve[i], d, frac)));
     return 'rgb(' + c[0] + ',' + c[1] + ',' + c[2] + ')';
   }
 
@@ -1876,6 +1934,13 @@
     catch (e) { GameState.char = Object.assign({}, DEFAULT_CHAR); }
   }
   function saveChar() { try { localStorage.setItem('raceToShabbat.char', JSON.stringify(GameState.char)); } catch (e) {} }
+  function loadSeason() {
+    let s = 'auto';
+    try { s = localStorage.getItem('raceToShabbat.season') || 'auto'; } catch (e) {}
+    if (s !== 'auto' && !SEASONS[s]) s = 'auto';
+    GameState.season = s;
+    document.querySelectorAll('.season-btn').forEach(b => b.classList.toggle('active', b.dataset.season === s));
+  }
   function loadTrophies() {
     try { GameState.bestStars = JSON.parse(localStorage.getItem('raceToShabbat.bestStars') || '{}') || {}; } catch (e) { GameState.bestStars = {}; }
     GameState.totalStars = Object.values(GameState.bestStars).reduce((a, b) => a + b, 0);
@@ -1924,9 +1989,13 @@
     GameState.daily = !!daily;
     if (daily) { GameState.difficulty = 'medium'; GameState.runSeed = 'D' + dateKey(); }   // אתגר יומי — אותו seed לכולם לפי התאריך
     else { GameState.runSeed = 'R' + ((Math.random() * 1e9) | 0); }
+    // עונה: באתגר יומי נקבעת אוטומטית לפי התאריך (הוגן לכולם); אחרת לפי בחירת השחקן
+    const seasonId = resolveSeasonId(GameState.season, daily);
+    GameState.activeSeason = SEASONS[seasonId];
     const d = DIFF[GameState.difficulty];
-    GameState.mainTimerMax = d.time === Infinity ? 0 : d.time;
-    GameState.mainTimer = d.time === Infinity ? 0 : d.time;
+    const seasonTime = d.time === Infinity ? 0 : Math.round(d.time * GameState.activeSeason.timeMul);
+    GameState.mainTimerMax = seasonTime;
+    GameState.mainTimer = seasonTime;
     GameState.score = 0; GameState.missed = 0; GameState.combo = 0; GameState.stars = {};
     GameState.completed = new Set(); GameState.achievements = new Set();
     GameState.activeScene = null; GameState.screen = 'playing';
@@ -1934,6 +2003,8 @@
     document.getElementById('screen-start').classList.add('hidden');
     document.getElementById('screen-end').classList.add('hidden');
     updateHUD();
+    const se = GameState.activeSeason;
+    showToast(se.emoji + ' ' + se.label + ' · ' + se.note);
   }
 
   function endGame(reason) {
@@ -2062,6 +2133,14 @@
       GameState.difficulty = b.dataset.diff;
     });
   });
+  document.querySelectorAll('.season-btn').forEach(b => {
+    b.addEventListener('click', () => {
+      document.querySelectorAll('.season-btn').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      GameState.season = b.dataset.season;
+      try { localStorage.setItem('raceToShabbat.season', GameState.season); } catch (e) {}
+    });
+  });
   document.getElementById('start-btn').addEventListener('click', () => startGame(false));
   document.getElementById('daily-btn').addEventListener('click', () => startGame(true));
   document.getElementById('again-btn').addEventListener('click', () => startGame(GameState.daily));
@@ -2115,6 +2194,7 @@
   // ---------- אתחול ----------
   AudioManager.loadMute();
   loadChar();
+  loadSeason();
   loadTrophies();
   loadHigh();
   loadDaily();
