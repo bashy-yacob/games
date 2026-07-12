@@ -125,6 +125,20 @@
   .summary-row b { color: #f4c542; }
   .ach-list { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
   .ach-item { font-size: 14px; background: rgba(244,197,66,0.14); border-radius: 10px; padding: 7px 10px; text-align: right; }
+  .ach-item.medal-up { background: rgba(127,176,232,0.18); font-weight: 800; }
+  /* אלבום גביעים */
+  .album-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; max-width: 380px; width: 100%; }
+  .medal { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 14px; padding: 10px 8px; text-align: center; }
+  .medal.locked { opacity: 0.5; }
+  .medal .m-ic { font-size: 30px; line-height: 1; }
+  .medal.locked .m-ic { filter: grayscale(1); }
+  .medal .m-title { font-size: 13px; font-weight: 800; margin-top: 4px; color: #fff8e7; }
+  .medal .m-tier { font-size: 12px; font-weight: 800; margin-top: 2px; }
+  .medal .m-pips { font-size: 14px; margin-top: 3px; letter-spacing: 3px; }
+  .medal .m-pips .off { filter: grayscale(1); opacity: 0.35; }
+  .medal .m-prog { font-size: 11px; opacity: 0.72; margin-top: 3px; }
+  .t1 { color: #d98a4e; } .t2 { color: #cdd4dc; } .t3 { color: #f4c542; }
   .instr { font-size: 14px; text-align: right; line-height: 1.7; opacity: 0.9; max-width: 340px; }
   .instr b { color: #f4c542; }
   /* התאמה אישית */
@@ -204,6 +218,7 @@
         <button class="btn" id="start-btn">התחלה ▶</button>
         <button class="btn daily" id="daily-btn">📅 אתגר יומי</button>
         <div class="daily-info" id="daily-info"></div>
+        <button class="btn secondary" id="album-btn">🏅 אלבום גביעים</button>
         <button class="btn secondary" id="fs-btn2">⛶ מסך מלא</button>
         <div class="instr">
           <b>איך משחקים:</b><br>
@@ -230,6 +245,14 @@
         <button class="btn daily hidden" id="share-btn">📋 שתף תוצאה</button>
         <button class="btn" id="again-btn">🔄 שחק שוב</button>
         <button class="btn secondary" id="menu-btn">חזרה לתפריט</button>
+      </div>
+
+      <!-- Trophy album -->
+      <div id="screen-album" class="screen hidden">
+        <h1 class="title" style="font-size:32px">🏅 אלבום גביעים</h1>
+        <p class="subtitle">אספו מדליות ברונזה 🥉 · כסף 🥈 · זהב 🥇 — כל דרגה נשמרת לתמיד.</p>
+        <div class="album-grid" id="album-grid"></div>
+        <button class="btn" id="album-close">חזרה לתפריט</button>
       </div>
     </div>
   </div>
@@ -431,6 +454,38 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => el.classList.remove('show'), 2600);
   }
+
+  // ---------- מדליות מדורגות + אלבום גביעים ----------
+  // כל מדליה: ערך נמדד (val) מול ספי דרגה (tiers) → ברונזה/כסף/זהב.
+  // הדרגה הגבוהה שהושגה אי-פעם נשמרת ב-localStorage.
+  const MEDALS = [
+    { id: 'stars',   icon: '⭐', title: 'אספן/ית כוכבים', unit: 'כוכבים', persistent: true,  tiers: [10, 20, 30],    val: () => GameState.totalStars || 0 },
+    { id: 'score',   icon: '🏆', title: 'שובר/ת שיאים',   unit: 'נק׳',    persistent: true,  tiers: [350, 650, 1000], val: () => GameState.highScore || 0 },
+    { id: 'allDone', icon: '🏠', title: 'בעל/ת הבית',      unit: 'ריצות',  persistent: true,  tiers: [1, 5, 15],       val: () => MedalManager.stats.allDone || 0 },
+    { id: 'host',    icon: '🤝', title: 'מכניס/ת אורחים',  unit: 'אורחים', persistent: false, tiers: [3, 6, 10],       val: () => Guests.count || 0 },
+    { id: 'combo',   icon: '🔥', title: 'מלך/ת הקומבו',    unit: 'קומבו',  persistent: false, tiers: [3, 6, 8],        val: () => GameState.maxCombo || 0 },
+    { id: 'noMiss',  icon: '✨', title: 'ללא פספוס',       unit: '',       persistent: false, tiers: [1],              val: () => (GameState.completed.size >= ALL_GAMES.length && GameState.missed === 0) ? 1 : 0 },
+    { id: 'candles', icon: '🕯️', title: 'נרות בול בזמן',   unit: '',       persistent: false, tiers: [1],              val: () => GameState.achievements.has('perfectCandles') ? 1 : 0 },
+  ];
+  const TIER_NAMES = ['—', 'ברונזה 🥉', 'כסף 🥈', 'זהב 🥇'];
+  const TIER_PIP = ['', '🥉', '🥈', '🥇'];
+  function tierOf(tiers, v) { let t = 0; for (const th of tiers) if (v >= th) t++; return t; }
+  const MedalManager = {
+    earned: {}, stats: { allDone: 0 },
+    load() { this.earned = readJSON('raceToShabbat.medals', {}); this.stats = readJSON('raceToShabbat.stats', { allDone: 0 }); },
+    save() { try { localStorage.setItem('raceToShabbat.medals', JSON.stringify(this.earned)); localStorage.setItem('raceToShabbat.stats', JSON.stringify(this.stats)); } catch (e) {} },
+    // מעריך את כל המדליות מול המצב הנוכחי, שומר דרגות שעלו, ומחזיר את השדרוגים
+    evaluate() {
+      const ups = [];
+      MEDALS.forEach(m => {
+        const t = tierOf(m.tiers, m.val()), prev = this.earned[m.id] || 0;
+        if (t > prev) { this.earned[m.id] = t; ups.push({ m, tier: t }); }
+      });
+      if (ups.length) this.save();
+      return ups;
+    },
+    count() { return MEDALS.reduce((a, m) => a + ((this.earned[m.id] || 0) > 0 ? 1 : 0), 0); },
+  };
 
   /* ============================================================
      Scenes — כל מיני-משחק אובייקט עם ממשק אחיד:
@@ -1802,6 +1857,7 @@
         }
         // קומבו — בונוס על רצף השלמות בלי כישלון
         GameState.combo++;
+        if (GameState.combo > (GameState.maxCombo || 0)) GameState.maxCombo = GameState.combo;
         const comboBonus = GameState.combo >= 2 ? (GameState.combo - 1) * 15 : 0;
         GameState.score += r.score + comboBonus;
         showToast('כל הכבוד! ' + '⭐'.repeat(stars) + (GameState.combo >= 3 ? '  ·  רצף x' + GameState.combo + '!' : ''));
@@ -2010,6 +2066,44 @@
     try { GameState.bestStars = JSON.parse(localStorage.getItem('raceToShabbat.bestStars') || '{}') || {}; } catch (e) { GameState.bestStars = {}; }
     GameState.totalStars = Object.values(GameState.bestStars).reduce((a, b) => a + b, 0);
     const el = document.getElementById('start-stars'); if (el) el.textContent = GameState.totalStars;
+    const ab = document.getElementById('album-btn');
+    if (ab) ab.textContent = '🏅 אלבום גביעים (' + MedalManager.count() + '/' + MEDALS.length + ')';
+  }
+  // ---------- אלבום גביעים ----------
+  function renderAlbum() {
+    const grid = document.getElementById('album-grid');
+    grid.innerHTML = '';
+    MEDALS.forEach(m => {
+      const tier = MedalManager.earned[m.id] || 0, maxT = m.tiers.length;
+      const card = document.createElement('div');
+      card.className = 'medal' + (tier === 0 ? ' locked' : '');
+      // דרגות (פיפים) — לחד-דרגתי מציגים 🏅 בודד
+      let pips;
+      if (maxT === 1) pips = '<span class="' + (tier ? '' : 'off') + '">🏅</span>';
+      else pips = [1, 2, 3].map(i => '<span class="' + (i <= tier ? '' : 'off') + '">' + TIER_PIP[i] + '</span>').join('');
+      // שורת התקדמות
+      let prog;
+      if (tier >= maxT) prog = 'הושלם! ✨';
+      else { const next = m.tiers[tier]; prog = (m.persistent ? ('כעת ' + m.val() + ' · ') : '') + 'הבא: ' + next + (m.unit ? ' ' + m.unit : ''); }
+      const tName = maxT === 1 ? (tier ? 'הושג 🥇' : 'טרם הושג') : TIER_NAMES[tier];
+      card.innerHTML =
+        '<div class="m-ic">' + m.icon + '</div>' +
+        '<div class="m-title">' + m.title + '</div>' +
+        '<div class="m-tier t' + tier + '">' + tName + '</div>' +
+        '<div class="m-pips">' + pips + '</div>' +
+        '<div class="m-prog">' + prog + '</div>';
+      grid.appendChild(card);
+    });
+  }
+  function openAlbum() {
+    renderAlbum();
+    document.getElementById('screen-start').classList.add('hidden');
+    document.getElementById('screen-album').classList.remove('hidden');
+  }
+  function closeAlbum() {
+    document.getElementById('screen-album').classList.add('hidden');
+    document.getElementById('screen-start').classList.remove('hidden');
+    loadTrophies();
   }
   function saveTrophies() { try { localStorage.setItem('raceToShabbat.bestStars', JSON.stringify(GameState.bestStars)); } catch (e) {} }
 
@@ -2061,7 +2155,7 @@
     const seasonTime = d.time === Infinity ? 0 : Math.round(d.time * GameState.activeSeason.timeMul);
     GameState.mainTimerMax = seasonTime;
     GameState.mainTimer = seasonTime;
-    GameState.score = 0; GameState.missed = 0; GameState.combo = 0; GameState.stars = {};
+    GameState.score = 0; GameState.missed = 0; GameState.combo = 0; GameState.maxCombo = 0; GameState.stars = {};
     GameState.completed = new Set(); GameState.achievements = new Set();
     GameState.activeScene = null; GameState.screen = 'playing';
     Hub.build();
@@ -2083,6 +2177,10 @@
     // הישגים סופיים
     if (GameState.completed.size > 0 && GameState.missed === 0) AchievementManager.unlock('noMiss');
     const isHigh = saveHigh();
+
+    // מדליות מדורגות — סופרים ריצה מלאה, מעריכים ושומרים דרגות שעלו
+    if (GameState.completed.size >= ALL_GAMES.length) MedalManager.stats.allDone = (MedalManager.stats.allDone || 0) + 1;
+    const medalUps = MedalManager.evaluate();
 
     // מסך סיום
     const done = GameState.completed.size, total = ALL_GAMES.length;
@@ -2114,7 +2212,13 @@
 
     const achEl = document.getElementById('end-ach');
     achEl.innerHTML = '';
-    if (GameState.achievements.size === 0) {
+    // מדליות שעלו דרגה — בראש הרשימה
+    medalUps.forEach(u => {
+      const d = document.createElement('div'); d.className = 'ach-item medal-up';
+      d.textContent = TIER_PIP[u.tier] + ' מדליית ' + TIER_NAMES[u.tier].split(' ')[0] + ': ' + u.m.title;
+      achEl.appendChild(d);
+    });
+    if (GameState.achievements.size === 0 && medalUps.length === 0) {
       const d = document.createElement('div'); d.className = 'ach-item'; d.textContent = 'אין הישגים הפעם — נסו להשלים בלי לפספס!';
       achEl.appendChild(d);
     } else {
@@ -2123,6 +2227,7 @@
         achEl.appendChild(d);
       });
     }
+    if (medalUps.length) AudioManager.sfx('perfect');
     if (isHigh) showToast('🏆 שיא אישי חדש!');
     document.getElementById('screen-end').classList.remove('hidden');
   }
@@ -2209,6 +2314,8 @@
   });
   document.getElementById('start-btn').addEventListener('click', () => startGame(false));
   document.getElementById('daily-btn').addEventListener('click', () => startGame(true));
+  document.getElementById('album-btn').addEventListener('click', openAlbum);
+  document.getElementById('album-close').addEventListener('click', closeAlbum);
   document.getElementById('again-btn').addEventListener('click', () => startGame(GameState.daily));
   document.getElementById('menu-btn').addEventListener('click', () => {
     GameState.screen = 'start';
@@ -2261,6 +2368,7 @@
   AudioManager.loadMute();
   loadChar();
   loadSeason();
+  MedalManager.load();
   loadTrophies();
   loadHigh();
   loadDaily();
@@ -2269,7 +2377,7 @@
   requestAnimationFrame(frame);
 
   // חשיפה קלה לבדיקות (Playwright)
-  window.__RTS__ = { GameState, ALL_GAMES, Hub, SceneManager, Finale, Guests, startGame, endGame };
+  window.__RTS__ = { GameState, ALL_GAMES, Hub, SceneManager, Finale, Guests, MedalManager, MEDALS, startGame, endGame };
 })();
 </script>
 </body>
